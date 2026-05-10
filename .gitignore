@@ -1,0 +1,7 @@
+node_modules/
+venv/
+.env
+__pycache__/
+.next/
+*.pyc
+backend/temp_repos/
