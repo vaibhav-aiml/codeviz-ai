@@ -90,6 +90,56 @@ def detect_framework(repo_path):
     
     return frameworks[:5] if frameworks else ['General Application']
 
+def get_full_file_tree(repo_path):
+    """Get complete file tree structure with normalized paths"""
+    tree = {}
+    exclude_dirs = {'.git', 'node_modules', '__pycache__', 'venv', 'env', '.venv', 'dist', 'build', '.next', 'target'}
+    
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        
+        rel_path = root.replace(repo_path, '').lstrip('/\\')
+        # Normalize to forward slashes
+        rel_path = rel_path.replace('\\', '/')
+        if not rel_path:
+            rel_path = '/'
+        
+        tree[rel_path] = {
+            'dirs': dirs[:],
+            'files': files[:]
+        }
+    
+    return tree
+
+def get_file_contents(repo_path, max_files=50, max_size=10000):
+    """Get contents of important files with normalized paths"""
+    contents = {}
+    count = 0
+    
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git']]
+        
+        for file in files:
+            if count >= max_files:
+                return contents
+            
+            filepath = os.path.join(root, file)
+            rel_path = filepath.replace(repo_path, '').lstrip('/\\')
+            # Normalize to forward slashes
+            rel_path = rel_path.replace('\\', '/')
+            
+            try:
+                size = os.path.getsize(filepath)
+                if size < max_size:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    contents[rel_path] = content
+                    count += 1
+            except:
+                pass
+    
+    return contents
+
 async def analyze_repository_task(analysis_id: str, repo_url: str, branch: str):
     """AI-powered analysis pipeline"""
     try:
@@ -105,7 +155,11 @@ async def analyze_repository_task(analysis_id: str, repo_url: str, branch: str):
         
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_path = os.path.join(tmpdir, "repo")
-            Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
+            try:
+                Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
+            except:
+                print(f"   Branch '{branch}' not found, trying 'master'...")
+                Repo.clone_from(repo_url, repo_path, branch='master', depth=1)
             print("✅ Cloned!")
             
             # Step 2: Analyze code
@@ -115,6 +169,11 @@ async def analyze_repository_task(analysis_id: str, repo_url: str, branch: str):
             code_samples = get_code_samples(repo_path)
             languages = detect_languages(repo_path)
             frameworks = detect_framework(repo_path)
+            
+            # Get file tree and contents
+            print("📂 Building file tree...")
+            file_tree = get_full_file_tree(repo_path)
+            file_contents = get_file_contents(repo_path)
             
             try:
                 file_count = sum(1 for _ in Path(repo_path).rglob('*') if _.is_file() and '.git' not in str(_))
@@ -165,8 +224,13 @@ async def analyze_repository_task(analysis_id: str, repo_url: str, branch: str):
                     repo_stats=repo_stats
                 )
             
+            # Add file tree and contents to result
+            result_dict = result.model_dump()
+            result_dict["file_tree"] = file_tree
+            result_dict["file_contents"] = file_contents
+            
             analyses_ref[analysis_id]["status"] = "completed"
-            analyses_ref[analysis_id]["result"] = result.model_dump()
+            analyses_ref[analysis_id]["result"] = result_dict
             print("✅ DONE!")
             
     except Exception as e:
