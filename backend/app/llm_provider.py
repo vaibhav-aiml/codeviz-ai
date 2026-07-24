@@ -39,6 +39,17 @@ def _clean_mermaid_diagram(code: str) -> str:
     text = re.sub(r'-->\|([^|]+)\|>', r'-->|\1|', text)
     text = re.sub(r'(?<=\s)->(?=\s)', r'-->', text)
 
+    # Automatically quote node labels containing special characters like ( ) / : .
+    def replace_bracket(match):
+        label = match.group(1).strip()
+        if label.startswith('"') and label.endswith('"'):
+            inner = label[1:-1].replace('"', "'")
+            return f'["{inner}"]'
+        safe_label = label.replace('"', "'")
+        return f'["{safe_label}"]'
+
+    text = re.sub(r'(?<=[a-zA-Z0-9_\-\$])\[([^\]\n]+)\]', replace_bracket, text)
+
     header_keywords = ["graph", "flowchart", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram"]
     if not any(text.lstrip().startswith(kw) for kw in header_keywords):
         text = "graph TD\n" + text
@@ -106,7 +117,7 @@ class GroqLLMProvider(BaseLLMProvider):
             for name, content in manifest_files.items():
                 manifest_text += f"\n--- {name} ---\n{content[:1500]}\n"
 
-        prompt = f"""You are a senior staff software architect conducting a technical architecture review 
+        prompt = f"""You are a senior staff software architect conducting a technical architecture review
 for a code review board. You will be graded on ACCURACY, not on how "impressive" the diagram looks.
 
 Repository: {repo_name}
@@ -124,17 +135,17 @@ Detected framework indicators: {', '.join(frameworks) if frameworks else 'unknow
 
 ## HARD RULES — read before answering
 1. Only describe components, services, and patterns that you can point to evidence for in the code above.
-   Do NOT invent generic components (e.g. "API Gateway", "Service Registry", "Load Balancer") unless a 
+   Do NOT invent generic components (e.g. "API Gateway", "Service Registry", "Load Balancer") unless a
    specific file, import, or config actually implements one.
-2. Name real modules/files/classes/functions where relevant (e.g. "the Celery task in tasks.py", 
+2. Name real modules/files/classes/functions where relevant (e.g. "the Celery task in tasks.py",
    "the Redis-backed RedisStateStore in redis_client.py") instead of generic labels.
 3. If the architecture is a monolith, single API service, or CLI tool — say so plainly. Do not force-fit
    it into a microservices template.
-4. The mermaid diagram's nodes must correspond 1:1 to real modules/services/external systems you found 
-   evidence for (e.g. actual queue technology, actual cache, actual external APIs called, actual DB — or 
+4. The mermaid diagram's nodes must correspond 1:1 to real modules/services/external systems you found
+   evidence for (e.g. actual queue technology, actual cache, actual external APIs called, actual DB — or
    "no persistent database" if none exists). Include external dependencies (third-party APIs, LLM providers,
    webhooks) as separate nodes with the real service name.
-5. In "recommendations", give 2-3 SPECIFIC, actionable engineering critiques tied to code you actually 
+5. In "recommendations", give 2-3 SPECIFIC, actionable engineering critiques tied to code you actually
    saw (e.g. blocking calls in async context, missing input validation, N+1 patterns) — not generic advice
    like "add more tests" or "improve documentation" unless nothing more specific applies.
 6. MERMAID SYNTAX CONSTRAINTS:
@@ -226,7 +237,7 @@ class OpenAILLMProvider(BaseLLMProvider):
             for name, content in manifest_files.items():
                 manifest_text += f"\n--- {name} ---\n{content[:1500]}\n"
 
-        prompt = f"""You are a senior staff software architect conducting a technical architecture review 
+        prompt = f"""You are a senior staff software architect conducting a technical architecture review
 for a code review board. You will be graded on ACCURACY, not on how "impressive" the diagram looks.
 
 Repository: {repo_name}
@@ -244,17 +255,17 @@ Detected framework indicators: {', '.join(frameworks) if frameworks else 'unknow
 
 ## HARD RULES — read before answering
 1. Only describe components, services, and patterns that you can point to evidence for in the code above.
-   Do NOT invent generic components (e.g. "API Gateway", "Service Registry", "Load Balancer") unless a 
+   Do NOT invent generic components (e.g. "API Gateway", "Service Registry", "Load Balancer") unless a
    specific file, import, or config actually implements one.
-2. Name real modules/files/classes/functions where relevant (e.g. "the Celery task in tasks.py", 
+2. Name real modules/files/classes/functions where relevant (e.g. "the Celery task in tasks.py",
    "the Redis-backed RedisStateStore in redis_client.py") instead of generic labels.
 3. If the architecture is a monolith, single API service, or CLI tool — say so plainly. Do not force-fit
    it into a microservices template.
-4. The mermaid diagram's nodes must correspond 1:1 to real modules/services/external systems you found 
-   evidence for (e.g. actual queue technology, actual cache, actual external APIs called, actual DB — or 
+4. The mermaid diagram's nodes must correspond 1:1 to real modules/services/external systems you found
+   evidence for (e.g. actual queue technology, actual cache, actual external APIs called, actual DB — or
    "no persistent database" if none exists). Include external dependencies (third-party APIs, LLM providers,
    webhooks) as separate nodes with the real service name.
-5. In "recommendations", give 2-3 SPECIFIC, actionable engineering critiques tied to code you actually 
+5. In "recommendations", give 2-3 SPECIFIC, actionable engineering critiques tied to code you actually
    saw (e.g. blocking calls in async context, missing input validation, N+1 patterns) — not generic advice
    like "add more tests" or "improve documentation" unless nothing more specific applies.
 

@@ -1,8 +1,11 @@
 import json
+from typing import Any, Dict, Optional
+
 import redis
-from typing import Optional, Dict, Any
+
 from .config import settings
 from .logger import logger
+
 
 class RedisStateStore:
     def __init__(self, redis_url: str = None):

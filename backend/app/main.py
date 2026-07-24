@@ -1,20 +1,21 @@
-import hmac
 import hashlib
+import hmac
 import uuid
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, Request, Header, BackgroundTasks
+from urllib.parse import urlparse
+
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from urllib.parse import urlparse
+from slowapi.util import get_remote_address
 
 from .config import settings
+from .github_stats import get_github_stats
 from .logger import logger
 from .redis_client import store
-from .tasks import analyze_repository_task, perform_analysis, celery_app
-from .github_stats import get_github_stats
+from .tasks import analyze_repository_task, celery_app, perform_analysis
 
 # Optional Sentry initialization
 if settings.SENTRY_DSN:
@@ -165,7 +166,7 @@ async def get_status(analysis_id: str):
     analysis = store.get_analysis(analysis_id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    
+
     return {
         "analysis_id": analysis_id,
         "status": analysis.get("status", "unknown"),
@@ -178,31 +179,31 @@ async def get_file_content(analysis_id: str, path: str = Query(..., description=
     analysis = store.get_analysis(analysis_id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    
+
     result = analysis.get("result")
     if not result:
         raise HTTPException(status_code=404, detail="No result found for this analysis")
-    
+
     file_contents = result.get("file_contents")
     if not file_contents:
         raise HTTPException(status_code=404, detail="File contents not available")
-    
+
     # Exact match check
     content = file_contents.get(path)
     if content is None:
         normalized_path = path.replace("\\", "/")
         content = file_contents.get(normalized_path)
-    
+
     if content is None:
         for key in file_contents:
             if key.endswith(path) or key.replace("\\", "/").endswith(path):
                 content = file_contents[key]
                 break
-    
+
     if content is None:
         available = list(file_contents.keys())[:5]
         raise HTTPException(status_code=404, detail=f"File not found: {path}. Available: {available}")
-    
+
     return {"path": path, "content": content}
 
 @app.post("/api/webhook/github")
@@ -214,28 +215,28 @@ async def github_webhook(
     """GitHub push webhook endpoint with HMAC signature verification"""
     payload_bytes = await request.body()
     secret = settings.GITHUB_WEBHOOK_SECRET
-    
+
     if secret:
         if not x_hub_signature_256 or not x_hub_signature_256.startswith("sha256="):
             raise HTTPException(status_code=401, detail="Missing or invalid X-Hub-Signature-256 header")
-        
+
         expected_sig = "sha256=" + hmac.new(
             secret.encode("utf-8"),
             payload_bytes,
             hashlib.sha256
         ).hexdigest()
-        
+
         if not hmac.compare_digest(expected_sig, x_hub_signature_256):
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     payload = await request.json()
     event_type = request.headers.get("X-GitHub-Event", "push")
-    
+
     if event_type == "push":
         repository = payload.get("repository", {})
         repo_url = repository.get("html_url") or repository.get("clone_url")
         default_branch = repository.get("default_branch", "main")
-        
+
         if repo_url:
             analysis_id = str(uuid.uuid4())
             initial_data = {
@@ -246,13 +247,13 @@ async def github_webhook(
                 "result": None
             }
             store.save_analysis(analysis_id, initial_data)
-            
+
             try:
                 analyze_repository_task.delay(analysis_id, repo_url, default_branch)
             except Exception as e:
                 logger.error(f"CRITICAL: Celery enqueue failed for webhook ({e}). Executing task via BackgroundTasks...")
                 background_tasks.add_task(perform_analysis, analysis_id, repo_url, default_branch)
-                
+
             return {
                 "message": "Push event received and analysis enqueued",
                 "analysis_id": analysis_id

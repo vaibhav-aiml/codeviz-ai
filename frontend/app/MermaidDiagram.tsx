@@ -56,6 +56,13 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
           .replace(/---\|([^|]+)\|>/g, '-->|$1|')
           .replace(/-->\|([^|]+)\|>/g, '-->|$1|')
           .replace(/(?<=\s)->(?=\s)/g, '-->')
+          .replace(/(?<=[a-zA-Z0-9_\-\$])\[([^\]\n]+)\]/g, (match, label) => {
+            const trimmed = label.trim();
+            if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+              return `["${trimmed.slice(1, -1).replace(/"/g, "'")}"]`;
+            }
+            return `["${trimmed.replace(/"/g, "'")}"]`;
+          })
           .trim();
         
         const headerKeywords = ['graph', 'flowchart', 'sequenceDiagram', 'classDiagram', 'stateDiagram', 'erDiagram'];
@@ -77,11 +84,11 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
             const fallbackCode = cleanedCode
               .split('\n')
               .map(line => {
-                const l = line
+                return line
                   .replace(/--\|([^|]+)\|>/g, '-->|$1|')
                   .replace(/--\|([^|]+)\|->/g, '-->|$1|')
-                  .replace(/---\|([^|]+)\|>/g, '-->|$1|');
-                return l;
+                  .replace(/---\|([^|]+)\|>/g, '-->|$1|')
+                  .replace(/\[([^\]\n]+)\]/g, (m, lbl) => `["${lbl.replace(/"/g, "'")}"]`);
               })
               .join('\n');
             const fallbackId = `mermaid-fb-${Date.now()}`;
