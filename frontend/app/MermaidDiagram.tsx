@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { downloadPNG, downloadPDF } from './exportUtils';
+import { Maximize2, Minimize2, Download, FileText, Code2, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface MermaidDiagramProps {
   code: string;
@@ -29,6 +30,22 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
         const mermaidModule = await import('mermaid');
         const mermaid = mermaidModule.default;
         
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          themeVariables: {
+            darkMode: true,
+            background: '#0A0E17',
+            primaryColor: '#1A2332',
+            primaryTextColor: '#E2E8F0',
+            primaryBorderColor: '#6366F1',
+            lineColor: '#64748B',
+            secondaryColor: '#121824',
+            tertiaryColor: '#0A0E17',
+          },
+          fontFamily: 'JetBrains Mono, monospace',
+        });
+        
         let cleanedCode = code
           .replace(/→/g, '-->')
           .replace(/⇒/g, '==>')
@@ -47,8 +64,8 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          console.error('Mermaid error:', err);
-          const errorMsg = err instanceof Error ? err.message : 'Failed to render diagram';
+          console.error('Mermaid rendering error:', err);
+          const errorMsg = err instanceof Error ? err.message : 'Failed to parse & render Mermaid diagram syntax';
           setError(errorMsg);
           setIsLoading(false);
         }
@@ -86,80 +103,109 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Controls */}
-      <div className="flex items-center flex-wrap gap-2">
-        <button
-          onClick={() => setZoomed(!zoomed)}
-          className="px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all"
-        >
-          {zoomed ? '🔍 Zoom Out' : '🔍 Zoom In'}
-        </button>
-        <button
-          onClick={handleDownloadSVG}
-          disabled={!svg}
-          className="px-3 py-1.5 text-sm bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg transition-all disabled:opacity-50"
-        >
-          📥 SVG
-        </button>
-        <button
-          onClick={handleDownloadPNG}
-          disabled={!svg}
-          className="px-3 py-1.5 text-sm bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded-lg transition-all disabled:opacity-50"
-        >
-          🖼️ PNG
-        </button>
-        <button
-          onClick={handleDownloadPDF}
-          disabled={!svg}
-          className="px-3 py-1.5 text-sm bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg transition-all disabled:opacity-50"
-        >
-          📄 PDF
-        </button>
-        <button
-          onClick={() => setShowRaw(!showRaw)}
-          className="px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all"
-        >
-          {showRaw ? '👁️ Hide Code' : '👁️ View Code'}
-        </button>
-        <span className={`w-2 h-2 rounded-full ml-auto ${error ? 'bg-red-400' : isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`}></span>
-        <span className="text-xs text-gray-400">
-          {error ? 'Error' : isLoading ? 'Rendering...' : 'Ready'}
-        </span>
+    <div className="space-y-3">
+      {/* Precision Controls Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2 p-2 bg-[#121824] border border-[#232D3F] rounded-xl text-xs font-mono">
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setZoomed(!zoomed)}
+            className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#E2E8F0] border border-[#232D3F] rounded-lg transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+            title="Toggle fullscreen diagram view"
+          >
+            {zoomed ? <Minimize2 className="w-3.5 h-3.5 text-[#94A3B8]" /> : <Maximize2 className="w-3.5 h-3.5 text-[#94A3B8]" />}
+            <span>{zoomed ? 'Exit Zoom' : 'Fullscreen'}</span>
+          </button>
+          
+          <button
+            onClick={() => setShowRaw(!showRaw)}
+            className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#E2E8F0] border border-[#232D3F] rounded-lg transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+          >
+            <Code2 className="w-3.5 h-3.5 text-[#6366F1]" />
+            <span>{showRaw ? 'Hide Code' : 'Source Code'}</span>
+          </button>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={handleDownloadSVG}
+            disabled={!svg}
+            className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#0EA5E9] border border-[#232D3F] rounded-lg transition-colors disabled:opacity-40 flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>SVG</span>
+          </button>
+
+          <button
+            onClick={handleDownloadPNG}
+            disabled={!svg}
+            className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#10B981] border border-[#232D3F] rounded-lg transition-colors disabled:opacity-40 flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>PNG</span>
+          </button>
+
+          <button
+            onClick={handleDownloadPDF}
+            disabled={!svg}
+            className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#8B5CF6] border border-[#232D3F] rounded-lg transition-colors disabled:opacity-40 flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>PDF</span>
+          </button>
+
+          <div className="h-4 w-px bg-[#232D3F] mx-1" />
+
+          <div className="flex items-center space-x-1.5 px-2 py-1 text-[11px]">
+            <span className={`w-2 h-2 rounded-full ${error ? 'bg-[#EF4444]' : isLoading ? 'bg-[#F59E0B] animate-pulse' : 'bg-[#10B981]'}`} />
+            <span className="text-[#94A3B8]">
+              {error ? 'Parse Error' : isLoading ? 'Rendering' : 'Rendered'}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Raw Code */}
+      {/* Raw Code Inspector Drawer */}
       {showRaw && (
-        <pre className="text-xs text-gray-400 font-mono bg-slate-950 rounded-lg p-4 overflow-x-auto border border-white/10">
-          {code}
-        </pre>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-4">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div className="border border-[#232D3F] rounded-xl bg-[#0A0E17] p-4 overflow-hidden">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#232D3F] text-xs font-mono text-[#94A3B8]">
+            <span>Mermaid Syntax Definition</span>
+            <span>UTF-8</span>
+          </div>
+          <pre className="text-xs text-[#E2E8F0] font-mono overflow-x-auto leading-relaxed selection:bg-[#6366F1] selection:text-white">
+            {code}
+          </pre>
         </div>
       )}
 
-      {/* Diagram */}
+      {/* Error Callout */}
+      {error && (
+        <div className="bg-[#1A1015] border border-[#7F1D1D] rounded-xl p-4 flex items-start space-x-3 text-xs font-mono">
+          <AlertTriangle className="w-4 h-4 text-[#EF4444] flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-semibold text-[#FCA5A5]">Mermaid Syntax Exception</span>
+            <p className="text-[#F87171] leading-relaxed">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Diagram Canvas Container */}
       {!error && (
         <div
-          className={`bg-slate-950 rounded-xl border border-white/10 overflow-auto transition-all duration-300 ${
-            zoomed ? 'fixed inset-4 z-50 p-8' : ''
+          className={`bg-[#0A0E17] rounded-xl border border-[#232D3F] overflow-auto transition-all duration-200 ${
+            zoomed ? 'fixed inset-6 z-50 p-8 shadow-2xl bg-[#0A0E17]/95 backdrop-blur-xl border-[#6366F1]/50' : 'p-6 min-h-[320px]'
           }`}
-          style={{ maxHeight: zoomed ? '100vh' : '500px' }}
+          style={{ maxHeight: zoomed ? 'calc(100vh - 48px)' : '520px' }}
         >
           {isLoading && (
-            <div className="flex items-center justify-center h-32 text-gray-400">
-              <div className="animate-spin w-6 h-6 border-2 border-purple-400 border-t-transparent rounded-full mr-3"></div>
-              Rendering diagram...
+            <div className="flex items-center justify-center h-48 text-[#94A3B8] text-xs font-mono space-x-2">
+              <Loader2 className="w-5 h-5 animate-spin text-[#6366F1]" />
+              <span>Generating vector canvas layout...</span>
             </div>
           )}
           {svg && (
             <div
               ref={diagramRef}
-              className="flex justify-center p-4"
+              className="flex justify-center items-center min-h-[280px]"
               dangerouslySetInnerHTML={{ __html: svg }}
             />
           )}

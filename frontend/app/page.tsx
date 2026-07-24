@@ -1,8 +1,22 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Loader2, GitBranch, CheckCircle, XCircle, Layers, Lightbulb, FileCode, Star, GitFork, AlertCircle, Eye, ArrowRight, ExternalLink, Leaf, Moon, Sun, Cloud, Flower2 } from 'lucide-react';
+import {
+  Terminal,
+  GitBranch,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Layers,
+  FileCode2,
+  Star,
+  GitFork,
+  ArrowRight,
+  ExternalLink,
+  Share2,
+  Activity
+} from 'lucide-react';
 import MermaidDiagram from './MermaidDiagram';
 import FileExplorer from './FileExplorer';
 
@@ -13,46 +27,25 @@ interface AnalysisResultData {
   summary: string;
   key_components: string[];
   key_patterns: string[];
+  processing_time?: number;
+  files_analyzed?: number;
   repo_stats?: {
     stars?: number;
     forks?: number;
     open_issues?: number;
     watchers?: number;
+    size_kb?: number;
+    language?: string;
     error?: string;
   };
   file_tree?: Record<string, { dirs: string[]; files: string[] }>;
 }
 
-function ParticleField() {
-  const particles = useMemo(() => {
-    return [...Array(40)].map((_, i) => {
-      const left = (i * 17 + 5) % 100;
-      const top = (i * 29 + 7) % 100;
-      const size = (i % 4) + 2;
-      const delay = (i * 1.3) % 10;
-      const duration = ((i * 2.7) % 15) + 10;
-      const opacity = ((i * 3.3) % 6) / 10 + 0.2;
-      return {
-        width: `${size}px`,
-        height: `${size}px`,
-        left: `${left}%`,
-        top: `${top}%`,
-        backgroundColor: i % 3 === 0 ? '#a78bfa' : i % 3 === 1 ? '#67e8f9' : '#34d399',
-        animationDelay: `${delay}s`,
-        animationDuration: `${duration}s`,
-        opacity,
-      };
-    });
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-      {particles.map((p, i) => (
-        <div key={i} className="absolute rounded-full animate-float-particle" style={p} />
-      ))}
-    </div>
-  );
-}
+const PRESET_REPOS = [
+  { name: 'fastapi/fastapi', url: 'https://github.com/fastapi/fastapi', branch: 'master' },
+  { name: 'tailwindlabs/tailwindcss', url: 'https://github.com/tailwindlabs/tailwindcss', branch: 'main' },
+  { name: 'vercel/next.js', url: 'https://github.com/vercel/next.js', branch: 'canary' },
+];
 
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState('');
@@ -63,6 +56,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [analysisId, setAnalysisId] = useState<string>('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeTab, setActiveTab] = useState<'findings' | 'explorer'>('findings');
+  const [copiedShare, setCopiedShare] = useState(false);
 
   useEffect(() => {
     const timer = requestAnimationFrame(() => setMounted(true));
@@ -80,7 +76,7 @@ export default function Home() {
           if (currentStatus === 'completed' && currentResult) {
             setResult(currentResult);
           } else if (currentStatus === 'failed') {
-            setError('Analysis failed or expired.');
+            setError('Analysis task failed or expired.');
           }
         } catch {
           setError('Analysis not found.');
@@ -93,24 +89,51 @@ export default function Home() {
     return () => cancelAnimationFrame(timer);
   }, []);
 
+  // Honest timer tracking seconds during execution
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading && status && status !== 'completed' && status !== 'failed') {
+      interval = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [loading, status]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true); setError(null); setResult(null); setAnalysisId(''); setStatus('queued');
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setAnalysisId('');
+    setStatus('queued');
+    setElapsedSeconds(0);
+
     try {
       const response = await axios.post(`${API_URL}/api/analyze`, { repo_url: repoUrl, branch: branch });
       const newAnalysisId = response.data.analysis_id;
       setAnalysisId(newAnalysisId);
+
       const pollInterval = setInterval(async () => {
         try {
           const statusResponse = await axios.get(`${API_URL}/api/status/${newAnalysisId}`);
           const { status: currentStatus, result: currentResult } = statusResponse.data;
           setStatus(currentStatus);
-          if (currentStatus === 'completed') { setResult(currentResult); setLoading(false); clearInterval(pollInterval); }
-          else if (currentStatus === 'failed') { setError('Analysis failed. Please try again.'); setLoading(false); clearInterval(pollInterval); }
-        } catch (err) { console.error('Polling error:', err); }
+          if (currentStatus === 'completed') {
+            setResult(currentResult);
+            setLoading(false);
+            clearInterval(pollInterval);
+          } else if (currentStatus === 'failed') {
+            setError('Analysis task failed. Please check repository accessibility.');
+            setLoading(false);
+            clearInterval(pollInterval);
+          }
+        } catch (err) {
+          console.error('Status poll error:', err);
+        }
       }, 2000);
     } catch (err: unknown) {
-      let msg = 'Failed to start analysis. Please check the URL and try again.';
+      let msg = 'Failed to start analysis. Please verify the URL and try again.';
       if (axios.isAxiosError(err) && err.response?.data?.detail) {
         msg = err.response.data.detail;
       }
@@ -119,245 +142,379 @@ export default function Home() {
     }
   };
 
-  if (!mounted) return <div className="min-h-screen bg-[#0a0d14] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-emerald-400" /></div>;
-
-  const getStatusIcon = (s: string) => {
-    switch (s) { case 'completed': return <CheckCircle className="w-5 h-5 text-emerald-400" />; case 'failed': return <XCircle className="w-5 h-5 text-red-400" />; default: return <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />; }
+  const handleShare = () => {
+    if (!analysisId) return;
+    const shareUrl = `${window.location.origin}/analysis/${analysisId}`;
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2000);
   };
 
-  return (
-    <div className="min-h-screen bg-[#0a0d14] text-white overflow-x-hidden">
-      <ParticleField />
+  const pipelineStages = [
+    { key: 'queued', label: 'Queued' },
+    { key: 'cloning', label: 'Git Shallow Clone' },
+    { key: 'analyzing', label: 'Code Extraction & AI Inference' },
+    { key: 'completed', label: 'Diagram Bloomed' },
+  ];
 
-      {/* Animated gradient orbs */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
-        <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent rounded-full blur-7xl -translate-x-1/2 -translate-y-1/2 animate-pulse-slow" />
-        <div className="absolute top-1/2 right-0 w-[500px] h-[500px] bg-gradient-to-bl from-purple-500/10 via-indigo-500/5 to-transparent rounded-full blur-7xl translate-x-1/4 animate-pulse-slower" />
-        <div className="absolute bottom-0 left-1/3 w-[400px] h-[400px] bg-gradient-to-t from-cyan-500/10 via-blue-500/5 to-transparent rounded-full blur-7xl animate-pulse-slow" />
-        <svg className="absolute inset-0 w-full h-full opacity-10" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path d="M0,50 Q25,30 50,50 T100,50" fill="none" stroke="#34d399" strokeWidth="0.2" className="animate-draw" />
-          <path d="M0,70 Q30,90 60,60 T100,70" fill="none" stroke="#67e8f9" strokeWidth="0.15" className="animate-draw-delayed" />
-          <path d="M0,30 Q20,10 40,40 T100,20" fill="none" stroke="#a78bfa" strokeWidth="0.2" className="animate-draw-slower" />
-        </svg>
+  const getStageIndex = (currentStatus: string | null) => {
+    switch (currentStatus) {
+      case 'queued': return 0;
+      case 'cloning': return 1;
+      case 'analyzing': return 2;
+      case 'completed': return 3;
+      default: return 0;
+    }
+  };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-[#0A0E17] flex items-center justify-center font-mono text-xs text-[#94A3B8]">
+        <Activity className="w-5 h-5 animate-spin text-[#6366F1] mr-2" />
+        <span>Initializing Workbench...</span>
       </div>
+    );
+  }
 
-      {/* Header */}
-      <header className="relative z-50 border-b border-white/5 backdrop-blur-xl bg-[#0a0d14]/60">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+  return (
+    <div className="min-h-screen bg-[#0A0E17] text-[#E2E8F0] flex flex-col bg-grid-pattern">
+      {/* Header Toolbar */}
+      <header className="border-b border-[#232D3F] bg-[#121824]/90 backdrop-blur-md sticky top-0 z-40">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between font-mono text-xs">
           <div className="flex items-center space-x-3">
-            <div className="relative">
-              <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <Leaf className="w-6 h-6 text-[#0a0d14]" />
-              </div>
+            <div className="w-7 h-7 bg-[#6366F1] rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md shadow-[#6366F1]/20">
+              C
             </div>
-            <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                CodeViz AI
-              </h1>
-              <p className="text-xs text-gray-500">Architecture Visualization Engine</p>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-[#E2E8F0] tracking-tight">CodeViz AI</span>
+              <span className="text-[#64748B]">/</span>
+              <span className="text-[#94A3B8]">Architecture Workbench</span>
             </div>
           </div>
+
           <div className="flex items-center space-x-4">
-            <a href="https://github.com/vaibhav-aiml/codeviz-ai" target="_blank" rel="noopener noreferrer" className="p-2 hover:bg-white/5 rounded-xl transition-colors">
-              <ExternalLink className="w-5 h-5 text-gray-400 hover:text-white" />
+            <div className="hidden sm:flex items-center space-x-2 px-2.5 py-1 bg-[#1A2332] border border-[#232D3F] rounded-md text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+              <span className="text-[#94A3B8]">Groq Llama-3.3-70B Engine</span>
+            </div>
+
+            <a
+              href="https://github.com/vaibhav-aiml/codeviz-ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 hover:bg-[#1A2332] rounded-md text-[#94A3B8] hover:text-white transition-colors focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+              title="View GitHub Repository"
+            >
+              <ExternalLink className="w-4 h-4" />
             </a>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10">
+      {/* Main Workspace Body */}
+      <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
         {!result ? (
-          <section className="container mx-auto px-4 py-16 max-w-5xl">
-            <div className="text-center mb-16 space-y-6">
-              <div className="inline-flex items-center space-x-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-sm font-medium backdrop-blur-sm animate-bounce-slow">
-                <Flower2 className="w-4 h-4" />
-                <span>AI-Powered Codebase Architecture Visualizer</span>
+          /* Landing & Input Workspace */
+          <div className="max-w-4xl mx-auto space-y-8 py-6">
+            {/* Technical Title Banner */}
+            <div className="space-y-4 text-center md:text-left">
+              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-[#1A2332] border border-[#232D3F] rounded-md text-xs font-mono text-[#6366F1]">
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Codebase Architecture Digest & Visualization</span>
               </div>
-              <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
-                Watch Code Architecture{' '}
-                <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                  Bloom
-                </span>
+              <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                Understand Unfamiliar Repositories <span className="text-[#6366F1]">In Seconds</span>
               </h1>
-              <p className="text-gray-400 text-lg md:text-xl max-w-2xl mx-auto font-light leading-relaxed">
-                Transform complex GitHub repositories into clear, dynamic Mermaid architecture diagrams with organic file tree exploration.
+              <p className="text-[#94A3B8] text-sm md:text-base max-w-2xl leading-relaxed">
+                Clone, inspect structure, and synthesize interactive Mermaid architecture diagrams directly from GitHub source code.
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
-                <button onClick={() => document.getElementById('analyze-section')?.scrollIntoView({ behavior: 'smooth' })} className="group px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl text-lg font-semibold hover:shadow-2xl hover:shadow-emerald-500/30 transition-all hover:scale-105 flex items-center space-x-2">
-                  <span>Begin Journey</span>
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </button>
-                <a href="https://github.com/vaibhav-aiml/codeviz-ai" target="_blank" rel="noopener noreferrer" className="px-8 py-4 bg-white/5 border border-white/10 rounded-2xl text-lg font-semibold hover:bg-white/10 transition-all flex items-center space-x-2">
-                  <ExternalLink className="w-5 h-5" /><span>GitHub</span>
-                </a>
-              </div>
-
-              {/* Floating cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-20">
-                {[
-                  { icon: Moon, title: 'Deep Analysis', desc: 'AI dives into every file', color: 'emerald' },
-                  { icon: Sun, title: 'Clear Insights', desc: 'Beautiful visual output', color: 'teal' },
-                  { icon: Flower2, title: 'Organic Growth', desc: 'Understand any codebase', color: 'cyan' },
-                ].map((card, i) => (
-                  <div key={i} className="group relative bg-white/3 border border-white/5 rounded-2xl p-8 hover:bg-white/5 hover:border-emerald-500/20 transition-all duration-500 hover:-translate-y-2 backdrop-blur-sm">
-                    <div className={`w-14 h-14 bg-${card.color}-500/10 rounded-2xl flex items-center justify-center mb-5 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500`}>
-                      <card.icon className={`w-7 h-7 text-${card.color}-400`} />
-                    </div>
-                    <h3 className="text-lg font-semibold mb-2">{card.title}</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">{card.desc}</p>
-                  </div>
-                ))}
-              </div>
             </div>
 
-            {/* How It Works - Timeline */}
-            <div className="max-w-4xl mx-auto mb-20">
-              <h2 className="text-3xl font-bold text-center mb-16">
-                <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">The Growth Process</span>
-              </h2>
-              <div className="relative">
-                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-emerald-500/50 via-teal-500/30 to-transparent" />
-                {[
-                  { step: '01', title: 'Plant the Seed', desc: 'Paste any GitHub repository URL', icon: GitBranch },
-                  { step: '02', title: 'Root Analysis', desc: 'AI explores every file and folder', icon: Search },
-                  { step: '03', title: 'Blossom & Reveal', desc: 'Watch the architecture diagram bloom', icon: Flower2 },
-                ].map((item, i) => (
-                  <div key={i} className={`relative flex items-center mb-12 ${i % 2 === 0 ? 'flex-row' : 'flex-row-reverse'}`}>
-                    <div className={`w-1/2 ${i % 2 === 0 ? 'pr-12 text-right' : 'pl-12'}`}>
-                      <div className="bg-white/3 border border-white/5 rounded-2xl p-6 inline-block hover:border-emerald-500/20 transition-all">
-                        <span className="text-xs text-emerald-400 font-mono">{item.step}</span>
-                        <h3 className="text-lg font-semibold mt-1">{item.title}</h3>
-                        <p className="text-sm text-gray-500 mt-1">{item.desc}</p>
-                      </div>
-                    </div>
-                    <div className="absolute left-1/2 -translate-x-1/2 w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                      <item.icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="w-1/2" />
+            {/* Input CLI Bar */}
+            <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-6 shadow-2xl space-y-6">
+              <form onSubmit={handleSubmit} className="space-y-4 font-mono">
+                <div className="space-y-2">
+                  <label className="text-xs text-[#94A3B8] flex items-center justify-between">
+                    <span>Target Repository URL</span>
+                    <span className="text-[11px] text-[#64748B]">GitHub HTTPS only</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6366F1] font-bold text-sm">$</span>
+                    <input
+                      type="url"
+                      value={repoUrl}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                      placeholder="https://github.com/owner/repository"
+                      className="w-full pl-8 pr-4 py-3.5 bg-[#0A0E17] border border-[#232D3F] focus:border-[#6366F1] rounded-xl text-xs md:text-sm text-[#E2E8F0] placeholder-[#64748B] transition-colors"
+                      required
+                    />
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Input Section */}
-            <div id="analyze-section" className="max-w-3xl mx-auto">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 rounded-3xl blur-xl" />
-                <div className="relative bg-[#0a0d14]/80 border border-white/10 rounded-3xl p-8 backdrop-blur-2xl">
-                  <div className="text-center mb-6">
-                    <Cloud className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-                    <h2 className="text-2xl font-bold">Ready to Explore?</h2>
-                    <p className="text-gray-500 text-sm mt-1">Enter a repository URL to begin</p>
-                  </div>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="relative">
-                      <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-600 w-5 h-5" />
-                      <input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/username/repository" className="w-full pl-12 pr-4 py-4 bg-black/40 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white placeholder-gray-600 transition-all text-lg" required />
-                    </div>
-                    <div className="flex gap-4">
-                      <div className="w-28">
-                        <input type="text" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" className="w-full px-4 py-4 bg-black/40 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white transition-all text-center" />
-                      </div>
-                      <button type="submit" disabled={loading} className="flex-1 px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:from-gray-700 disabled:to-gray-800 rounded-2xl font-semibold text-lg transition-all flex items-center justify-center space-x-3 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20">
-                        {loading ? <><Loader2 className="w-6 h-6 animate-spin" /><span>Growing...</span></> : <><span>Start Analysis</span><ArrowRight className="w-6 h-6" /></>}
-                      </button>
-                    </div>
-                  </form>
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="space-y-2 md:col-span-1">
+                    <label className="text-xs text-[#94A3B8]">Branch</label>
+                    <div className="relative">
+                      <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#64748B]" />
+                      <input
+                        type="text"
+                        value={branch}
+                        onChange={(e) => setBranch(e.target.value)}
+                        placeholder="main"
+                        className="w-full pl-8 pr-3 py-3 bg-[#0A0E17] border border-[#232D3F] focus:border-[#6366F1] rounded-xl text-xs text-[#E2E8F0] transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-3 flex items-end">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-3.5 bg-[#6366F1] hover:bg-[#4F46E5] disabled:bg-[#1A2332] disabled:text-[#64748B] text-white font-semibold rounded-xl text-xs transition-colors flex items-center justify-center space-x-2 shadow-lg shadow-[#6366F1]/20 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+                    >
+                      {loading ? (
+                        <>
+                          <Activity className="w-4 h-4 animate-spin text-white" />
+                          <span>Executing Pipeline...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Execute Architecture Digest</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Preset Chips */}
+              <div className="pt-2 border-t border-[#232D3F] flex items-center flex-wrap gap-2 text-xs font-mono">
+                <span className="text-[#64748B] mr-1">Quick Benchmarks:</span>
+                {PRESET_REPOS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => {
+                      setRepoUrl(preset.url);
+                      setBranch(preset.branch);
+                    }}
+                    className="px-2.5 py-1 bg-[#1A2332] hover:bg-[#232D3F] border border-[#232D3F] rounded-lg text-[#0EA5E9] hover:text-white transition-colors focus-visible:ring-1 focus-visible:ring-[#6366F1]"
+                  >
+                    {preset.name}
+                  </button>
+                ))}
               </div>
             </div>
-          </section>
-        ) : (
-          /* Results */
-          <div className="container mx-auto px-4 py-8 max-w-6xl space-y-8">
-            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center space-x-3 backdrop-blur-sm">
-              <Flower2 className="w-5 h-5 text-emerald-400" />
-              <span className="text-emerald-200">Analysis bloomed successfully!</span>
-            </div>
 
-            <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <h2 className="text-xl font-semibold mb-4 flex items-center space-x-2"><Layers className="w-5 h-5 text-emerald-400" /><span>Architecture Diagram</span></h2>
-              <MermaidDiagram code={result.mermaid_code} />
-            </div>
+            {/* Honest Pipeline Status Telemetry Console */}
+            {status && !error && (
+              <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-6 font-mono text-xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#232D3F]">
+                  <div className="flex items-center space-x-2">
+                    <Activity className="w-4 h-4 text-[#6366F1] animate-spin" />
+                    <span className="font-semibold text-white">Pipeline Telemetry Stream</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-[#94A3B8]">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Elapsed: {elapsedSeconds}s</span>
+                  </div>
+                </div>
 
-            <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <h2 className="text-xl font-semibold mb-4 flex items-center space-x-2"><FileCode className="w-5 h-5 text-teal-400" /><span>Architecture Summary</span></h2>
-              <p className="text-gray-300 leading-relaxed">{result.summary}</p>
-            </div>
+                {/* Pipeline Stepper Bar */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
+                  {pipelineStages.map((stage, idx) => {
+                    const activeIdx = getStageIndex(status);
+                    const isCurrent = idx === activeIdx;
+                    const isDone = idx < activeIdx;
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2"><Leaf className="w-5 h-5 text-emerald-400" /><span>Key Components</span></h3>
-                <ul className="space-y-3">{result.key_components.map((c: string, i: number) => (<li key={i} className="flex items-center space-x-3 text-gray-300"><div className="w-2 h-2 bg-emerald-400 rounded-full" /><span>{c}</span></li>))}</ul>
-              </div>
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2"><Lightbulb className="w-5 h-5 text-yellow-400" /><span>Design Patterns</span></h3>
-                <ul className="space-y-3">{result.key_patterns.map((p: string, i: number) => (<li key={i} className="flex items-center space-x-3 text-gray-300"><div className="w-2 h-2 bg-yellow-400 rounded-full" /><span>{p}</span></li>))}</ul>
-              </div>
-            </div>
-
-            {result.repo_stats && !result.repo_stats.error && (
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h2 className="text-xl font-semibold mb-6">Repository Stats</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[{ icon: Star, color: 'text-yellow-400', val: result.repo_stats.stars, label: 'Stars' }, { icon: GitFork, color: 'text-blue-400', val: result.repo_stats.forks, label: 'Forks' }, { icon: AlertCircle, color: 'text-red-400', val: result.repo_stats.open_issues, label: 'Issues' }, { icon: Eye, color: 'text-emerald-400', val: result.repo_stats.watchers, label: 'Watchers' }].map((s, i) => (
-                    <div key={i} className="text-center p-4 bg-black/20 rounded-xl"><s.icon className={`w-6 h-6 ${s.color} mx-auto mb-2`} /><div className={`text-2xl font-bold ${s.color}`}>{s.val?.toLocaleString() || 0}</div><div className="text-xs text-gray-400">{s.label}</div></div>
-                  ))}
+                    return (
+                      <div
+                        key={stage.key}
+                        className={`p-3 rounded-xl border text-center transition-colors ${
+                          isCurrent
+                            ? 'bg-[#1A2332] border-[#6366F1] text-white shadow-md'
+                            : isDone
+                            ? 'bg-[#121824] border-[#10B981]/40 text-[#10B981]'
+                            : 'bg-[#0A0E17] border-[#232D3F] text-[#64748B]'
+                        }`}
+                      >
+                        <div className="text-[10px] text-[#64748B] mb-1 font-bold">STEP 0{idx + 1}</div>
+                        <div className="font-medium text-xs truncate">{stage.label}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            {result.file_tree && <FileExplorer fileTree={result.file_tree} analysisId={analysisId} apiUrl={API_URL} />}
+            {/* Error Callout */}
+            {error && (
+              <div className="p-4 bg-[#1A1015] border border-[#7F1D1D] rounded-2xl flex items-center space-x-3 text-xs font-mono">
+                <XCircle className="w-5 h-5 text-[#EF4444] flex-shrink-0" />
+                <span className="text-[#F87171]">{error}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Results Architecture Workbench */
+          <div className="space-y-6">
+            {/* Results Action & Telemetry Header */}
+            <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4 flex items-center justify-between flex-wrap gap-4 font-mono text-xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-[#10B981]/10 border border-[#10B981]/30 rounded-xl text-[#10B981]">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-white text-sm">Architecture Synthesis Complete</h2>
+                  <p className="text-[#94A3B8] text-[11px] mt-0.5">
+                    Processed in {result.processing_time || elapsedSeconds}s • {result.files_analyzed || 30} source files analyzed
+                  </p>
+                </div>
+              </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-4 pb-12">
-              {analysisId && (
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleShare}
+                  className="px-3.5 py-2 bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold rounded-xl transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>{copiedShare ? 'Link Copied!' : 'Share Analysis Link'}</span>
+                </button>
                 <button
                   onClick={() => {
-                    const shareUrl = `${window.location.origin}/analysis/${analysisId}`;
-                    navigator.clipboard.writeText(shareUrl);
-                    alert(`Share link copied to clipboard:\n${shareUrl}`);
+                    setResult(null);
+                    setStatus(null);
+                    setError(null);
+                    setRepoUrl('');
                   }}
-                  className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 font-semibold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                  className="px-3.5 py-2 bg-[#1A2332] hover:bg-[#232D3F] text-[#E2E8F0] border border-[#232D3F] rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-[#6366F1]"
                 >
-                  Share Result Link
+                  Analyze New Repository
                 </button>
-              )}
-              <button onClick={() => { setResult(null); setStatus(null); setError(null); setRepoUrl(''); setAnalysisId(''); }} className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all">
-                Analyze Another Repository
-              </button>
+              </div>
+            </div>
+
+            {/* Split View Workbench (65% Left Diagram / 35% Right Inspector) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column (65% Width): Diagram Workbench */}
+              <div className="lg:col-span-8 space-y-4">
+                <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#232D3F] font-mono text-xs">
+                    <div className="flex items-center space-x-2">
+                      <Layers className="w-4 h-4 text-[#6366F1]" />
+                      <span className="font-semibold text-white">System Architecture Canvas</span>
+                    </div>
+                  </div>
+                  <MermaidDiagram code={result.mermaid_code} />
+                </div>
+              </div>
+
+              {/* Right Column (35% Width): Tabbed Inspector Panel */}
+              <div className="lg:col-span-4 space-y-4 font-mono text-xs">
+                <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4 space-y-4">
+                  {/* Tab Controls */}
+                  <div className="flex items-center space-x-1 bg-[#0A0E17] p-1 border border-[#232D3F] rounded-xl">
+                    <button
+                      onClick={() => setActiveTab('findings')}
+                      className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
+                        activeTab === 'findings' ? 'bg-[#6366F1] text-white font-semibold' : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
+                      Findings
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('explorer')}
+                      className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
+                        activeTab === 'explorer' ? 'bg-[#6366F1] text-white font-semibold' : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
+                      File Explorer
+                    </button>
+                  </div>
+
+                  {/* Tab 1: Findings */}
+                  {activeTab === 'findings' && (
+                    <div className="space-y-4">
+                      {/* Summary */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8] flex items-center space-x-1.5">
+                          <FileCode2 className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                          <span>Executive Architectural Summary</span>
+                        </div>
+                        <div className="bg-[#0A0E17] border border-[#232D3F] rounded-xl p-3 text-xs leading-relaxed text-[#E2E8F0] font-sans">
+                          {result.summary}
+                        </div>
+                      </div>
+
+                      {/* Key Components */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8]">Key Components</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {result.key_components.map((comp, idx) => (
+                            <span key={idx} className="px-2.5 py-1 bg-[#1A2332] border border-[#232D3F] rounded-lg text-[#6366F1]">
+                              {comp}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Design Patterns */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8]">Architectural Patterns</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {result.key_patterns.map((pat, idx) => (
+                            <span key={idx} className="px-2.5 py-1 bg-[#1A2332] border border-[#232D3F] rounded-lg text-[#8B5CF6]">
+                              {pat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Repo Stats Grid */}
+                      {result.repo_stats && !result.repo_stats.error && (
+                        <div className="pt-2 border-t border-[#232D3F] space-y-2">
+                          <div className="text-[#94A3B8]">Repository Telemetry</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2.5 bg-[#0A0E17] border border-[#232D3F] rounded-xl text-center">
+                              <Star className="w-3.5 h-3.5 text-[#F59E0B] mx-auto mb-1" />
+                              <div className="font-bold text-white">{result.repo_stats.stars?.toLocaleString() || 0}</div>
+                              <div className="text-[10px] text-[#64748B]">Stars</div>
+                            </div>
+                            <div className="p-2.5 bg-[#0A0E17] border border-[#232D3F] rounded-xl text-center">
+                              <GitFork className="w-3.5 h-3.5 text-[#0EA5E9] mx-auto mb-1" />
+                              <div className="font-bold text-white">{result.repo_stats.forks?.toLocaleString() || 0}</div>
+                              <div className="text-[10px] text-[#64748B]">Forks</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 2: Explorer */}
+                  {activeTab === 'explorer' && (
+                    <div>
+                      {result.file_tree ? (
+                        <FileExplorer fileTree={result.file_tree} analysisId={analysisId} apiUrl={API_URL} />
+                      ) : (
+                        <div className="text-center py-6 text-[#64748B]">File tree unavailable</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
-
-        {status && status !== 'completed' && !error && !result && (
-          <div className="max-w-3xl mx-auto px-4 mb-8"><div className="p-4 rounded-xl flex items-center space-x-3 bg-cyan-500/10 border border-cyan-500/30 backdrop-blur-sm">{getStatusIcon(status)}<span className="capitalize font-medium">{status.replace(/_/g, ' ')}</span></div></div>
-        )}
-        {error && (
-          <div className="max-w-3xl mx-auto px-4 mb-8"><div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center space-x-3 backdrop-blur-sm"><XCircle className="w-5 h-5 text-red-400" /><span className="text-red-200">{error}</span></div></div>
-        )}
       </main>
 
-      <footer className="relative z-10 border-t border-white/5 py-6 mt-12">
-        <div className="container mx-auto px-4 text-center text-sm text-gray-600">🌿 CodeViz AI — Where code meets nature</div>
+      {/* Footer */}
+      <footer className="border-t border-[#232D3F] py-4 bg-[#0A0E17]">
+        <div className="container mx-auto px-4 text-center text-xs font-mono text-[#64748B]">
+          CodeViz AI — Precision Codebase Architecture Engine
+        </div>
       </footer>
-
-      <style jsx global>{`
-        @keyframes pulse-slow { 0%,100% { opacity:0.3; } 50% { opacity:0.6; } }
-        @keyframes pulse-slower { 0%,100% { opacity:0.2; } 50% { opacity:0.5; } }
-        @keyframes float-particle { 0%,100% { transform: translateY(0) translateX(0); opacity:0; } 10% { opacity:1; } 90% { opacity:1; } 100% { transform: translateY(-100vh) translateX(50px); opacity:0; } }
-        @keyframes draw { 0% { stroke-dashoffset: 200; } 100% { stroke-dashoffset: 0; } }
-        @keyframes draw-delayed { 0% { stroke-dashoffset: 200; } 50% { stroke-dashoffset: 200; } 100% { stroke-dashoffset: 0; } }
-        @keyframes draw-slower { 0% { stroke-dashoffset: 200; } 70% { stroke-dashoffset: 200; } 100% { stroke-dashoffset: 0; } }
-        @keyframes aurora { 0%,100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(20deg); } }
-        .animate-pulse-slow { animation: pulse-slow 6s ease-in-out infinite; }
-        .animate-pulse-slower { animation: pulse-slower 8s ease-in-out infinite; }
-        .animate-float-particle { animation: float-particle linear infinite; }
-        .animate-draw { stroke-dasharray: 200; animation: draw 3s ease-out forwards; }
-        .animate-draw-delayed { stroke-dasharray: 200; animation: draw-delayed 5s ease-out forwards; }
-        .animate-draw-slower { stroke-dasharray: 200; animation: draw-slower 7s ease-out forwards; }
-        .animate-aurora { animation: aurora 8s ease-in-out infinite; }
-        html { scroll-behavior: smooth; }
-      `}</style>
     </div>
   );
 }

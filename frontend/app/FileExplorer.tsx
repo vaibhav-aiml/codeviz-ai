@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Folder, FolderOpen, File, ChevronRight, ChevronDown, X, Copy, Check } from 'lucide-react';
+import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, X, Copy, Check, Terminal } from 'lucide-react';
 
 interface FileNode {
   dirs: string[];
@@ -37,7 +37,6 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
   };
 
   const findFileContent = async (filePath: string) => {
-    // Try different path variations
     const variations = [
       filePath,
       filePath.replace(/^\//, ''),
@@ -49,7 +48,6 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
     for (const path of variations) {
       try {
         const url = `${apiUrl}/api/file-content/${analysisId}?path=${encodeURIComponent(path)}`;
-        console.log('Trying:', url);
         const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
@@ -68,7 +66,7 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
     setLoading(true);
     
     const content = await findFileContent(filePath);
-    setFileContent(content || 'Unable to load file content');
+    setFileContent(content || '// Content unavailable or binary file.');
     setLoading(false);
   };
 
@@ -83,119 +81,129 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
     return `${parent}/${name}`;
   };
 
-  const getLanguageClass = (filename: string) => {
-    if (filename.endsWith('.py')) return 'text-blue-400';
-    if (filename.endsWith('.js') || filename.endsWith('.ts')) return 'text-yellow-400';
-    if (filename.endsWith('.jsx') || filename.endsWith('.tsx')) return 'text-cyan-400';
-    if (filename.endsWith('.css')) return 'text-pink-400';
-    if (filename.endsWith('.html')) return 'text-orange-400';
-    if (filename.endsWith('.json')) return 'text-green-400';
-    if (filename.endsWith('.md')) return 'text-gray-400';
-    return 'text-purple-400';
+  const getLanguageColor = (filename: string) => {
+    if (filename.endsWith('.py')) return 'text-[#60A5FA]';
+    if (filename.endsWith('.js') || filename.endsWith('.ts')) return 'text-[#FBBF24]';
+    if (filename.endsWith('.jsx') || filename.endsWith('.tsx')) return 'text-[#38BDF8]';
+    if (filename.endsWith('.json') || filename.endsWith('.md')) return 'text-[#C084FC]';
+    return 'text-[#94A3B8]';
   };
 
-  const renderTree = (path: string = '/', level: number = 0) => {
-    const node = fileTree[path];
+  const renderTree = (currentPath: string = '/') => {
+    const node = fileTree[currentPath];
     if (!node) return null;
 
-    const isExpanded = expandedFolders.has(path);
-    const paddingLeft = level * 16;
-
     return (
-      <div key={path}>
-        {path !== '/' && (
-          <div
-            className="flex items-center space-x-1 py-1 px-2 hover:bg-white/5 rounded cursor-pointer text-sm"
-            style={{ paddingLeft: `${paddingLeft}px` }}
-            onClick={() => toggleFolder(path)}
-          >
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            )}
-            {isExpanded ? (
-              <FolderOpen className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-            ) : (
-              <Folder className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-            )}
-            <span className="text-gray-300 truncate">{path.split('/').pop()}</span>
-          </div>
-        )}
-
-        {isExpanded && (
-          <div>
-            {node.dirs.map((dir) => {
-              const childPath = buildPath(path, dir);
-              return renderTree(childPath, level + 1);
-            })}
-            
-            {node.files.map((file) => {
-              const filePath = buildPath(path, file);
-              return (
-                <div
-                  key={filePath}
-                  className={`flex items-center space-x-1 py-1 px-2 hover:bg-white/5 rounded cursor-pointer text-sm ${
-                    selectedFile === filePath ? 'bg-blue-500/20' : ''
-                  }`}
-                  style={{ paddingLeft: `${(level + 1) * 16}px` }}
-                  onClick={() => openFile(filePath)}
-                >
-                  <File className={`w-4 h-4 flex-shrink-0 ${getLanguageClass(file)}`} />
-                  <span className="text-gray-300 truncate">{file}</span>
+      <div key={currentPath} className="space-y-0.5 text-xs font-mono">
+        {node.dirs.map((dir) => {
+          const fullDirPath = buildPath(currentPath, dir);
+          const dirExpanded = expandedFolders.has(fullDirPath);
+          return (
+            <div key={fullDirPath}>
+              <button
+                onClick={() => toggleFolder(fullDirPath)}
+                className="w-full flex items-center space-x-1.5 py-1 px-2 hover:bg-[#1A2332] text-[#E2E8F0] rounded transition-colors text-left focus-visible:ring-1 focus-visible:ring-[#6366F1]"
+              >
+                {dirExpanded ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#94A3B8]" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#94A3B8]" />
+                )}
+                {dirExpanded ? (
+                  <FolderOpen className="w-3.5 h-3.5 text-[#6366F1]" />
+                ) : (
+                  <Folder className="w-3.5 h-3.5 text-[#6366F1]" />
+                )}
+                <span className="truncate">{dir}</span>
+              </button>
+              {dirExpanded && (
+                <div className="pl-4 border-l border-[#232D3F] ml-2.5 my-0.5">
+                  {renderTree(fullDirPath)}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              )}
+            </div>
+          );
+        })}
+
+        {node.files.map((file) => {
+          const fullFilePath = buildPath(currentPath, file);
+          return (
+            <button
+              key={fullFilePath}
+              onClick={() => openFile(fullFilePath)}
+              className="w-full flex items-center space-x-2 py-1 px-2 hover:bg-[#1A2332] text-[#94A3B8] hover:text-[#E2E8F0] rounded transition-colors text-left focus-visible:ring-1 focus-visible:ring-[#6366F1]"
+            >
+              <FileText className={`w-3.5 h-3.5 ${getLanguageColor(file)}`} />
+              <span className="truncate">{file}</span>
+            </button>
+          );
+        })}
       </div>
     );
   };
 
   return (
-    <>
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-        <h2 className="text-xl font-semibold mb-4 flex items-center space-x-2">
-          <Folder className="w-5 h-5 text-yellow-400" />
-          <span>Repository Files</span>
-        </h2>
-        
-        <div className="bg-slate-950 rounded-xl p-4 max-h-96 overflow-y-auto border border-white/5">
-          {renderTree()}
+    <div className="bg-[#121824] border border-[#232D3F] rounded-xl overflow-hidden font-mono text-xs">
+      {/* Explorer Header */}
+      <div className="px-4 py-3 bg-[#0A0E17] border-b border-[#232D3F] flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <Terminal className="w-4 h-4 text-[#6366F1]" />
+          <span className="font-semibold text-[#E2E8F0]">File Inspector Tree</span>
         </div>
+        <span className="text-[11px] text-[#64748B]">Click file to inspect source</span>
       </div>
 
+      {/* Tree Content */}
+      <div className="p-3 max-h-96 overflow-y-auto">
+        {renderTree('/')}
+      </div>
+
+      {/* Code Viewer Modal */}
       {fullScreen && selectedFile && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/20 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <div className="flex items-center space-x-3">
-                <File className={`w-5 h-5 ${getLanguageClass(selectedFile)}`} />
-                <span className="text-sm font-mono text-gray-300">{selectedFile}</span>
+        <div className="fixed inset-0 z-50 bg-[#0A0E17]/90 backdrop-blur-md flex items-center justify-center p-4 md:p-8">
+          <div className="bg-[#121824] border border-[#232D3F] rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="px-4 py-3 bg-[#0A0E17] border-b border-[#232D3F] flex items-center justify-between">
+              <div className="flex items-center space-x-2 overflow-hidden pr-4">
+                <FileText className="w-4 h-4 text-[#6366F1] flex-shrink-0" />
+                <span className="font-mono text-xs text-[#E2E8F0] truncate">{selectedFile}</span>
               </div>
-              <div className="flex items-center space-x-2">
-                <button onClick={copyToClipboard} className="flex items-center space-x-1 px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-lg">
-                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              
+              <div className="flex items-center space-x-2 flex-shrink-0">
+                <button
+                  onClick={copyToClipboard}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#E2E8F0] border border-[#232D3F] rounded-lg text-xs transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-[#10B981]" /> : <Copy className="w-3.5 h-3.5 text-[#94A3B8]" />}
                   <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
-                <button onClick={() => setFullScreen(false)} className="p-1.5 hover:bg-white/10 rounded-lg">
-                  <X className="w-5 h-5" />
+                
+                <button
+                  onClick={() => setFullScreen(false)}
+                  className="p-1.5 hover:bg-[#232D3F] text-[#94A3B8] hover:text-white rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+                  title="Close Inspector"
+                >
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-4">
+
+            {/* Modal Code Viewer Body */}
+            <div className="flex-1 overflow-auto p-4 bg-[#0A0E17] font-mono text-xs leading-relaxed text-[#E2E8F0]">
               {loading ? (
-                <div className="flex items-center justify-center h-32 text-gray-400">
-                  <div className="animate-spin w-6 h-6 border-2 border-purple-400 border-t-transparent rounded-full mr-3"></div>
-                  Loading...
+                <div className="flex items-center justify-center h-full text-[#94A3B8]">
+                  <span>Fetching file contents...</span>
                 </div>
               ) : (
-                <pre className="text-sm font-mono text-green-400 whitespace-pre-wrap">{fileContent}</pre>
+                <pre className="whitespace-pre overflow-x-auto selection:bg-[#6366F1] selection:text-white">
+                  {fileContent}
+                </pre>
               )}
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

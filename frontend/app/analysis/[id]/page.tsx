@@ -3,7 +3,17 @@
 import { use, useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
-import { Loader2, CheckCircle, XCircle, Layers, FileCode, Leaf, Lightbulb, Star, GitFork, AlertCircle, Eye, Flower2, ArrowLeft, Share2 } from 'lucide-react';
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Layers,
+  FileCode2,
+  Star,
+  GitFork,
+  ArrowLeft,
+  Share2
+} from 'lucide-react';
 import MermaidDiagram from '../../MermaidDiagram';
 import FileExplorer from '../../FileExplorer';
 
@@ -14,6 +24,8 @@ interface AnalysisResultData {
   summary: string;
   key_components: string[];
   key_patterns: string[];
+  processing_time?: number;
+  files_analyzed?: number;
   repo_stats?: {
     stars?: number;
     forks?: number;
@@ -29,10 +41,10 @@ export default function SharedAnalysisPage({ params }: { params: Promise<{ id: s
   const analysisId = resolvedParams.id;
 
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<string | null>('analyzing');
   const [result, setResult] = useState<AnalysisResultData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<'findings' | 'explorer'>('findings');
 
   useEffect(() => {
     let isSubscribed = true;
@@ -40,11 +52,10 @@ export default function SharedAnalysisPage({ params }: { params: Promise<{ id: s
       .then(res => {
         if (!isSubscribed) return;
         const { status: currentStatus, result: currentResult } = res.data;
-        setStatus(currentStatus);
         if (currentStatus === 'completed' && currentResult) {
           setResult(currentResult);
         } else if (currentStatus === 'failed') {
-          setError('Analysis failed or was not found.');
+          setError('Analysis task failed or was not found.');
         }
         setLoading(false);
       })
@@ -66,136 +77,193 @@ export default function SharedAnalysisPage({ params }: { params: Promise<{ id: s
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0d14] text-white overflow-x-hidden">
+    <div className="min-h-screen bg-[#0A0E17] text-[#E2E8F0] flex flex-col bg-grid-pattern font-sans">
       {/* Header */}
-      <header className="relative z-50 border-b border-white/5 backdrop-blur-xl bg-[#0a0d14]/60">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="border-b border-[#232D3F] bg-[#121824]/90 backdrop-blur-md sticky top-0 z-40">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between font-mono text-xs">
           <Link href="/" className="flex items-center space-x-3 group">
-            <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-              <Leaf className="w-6 h-6 text-[#0a0d14]" />
+            <div className="w-7 h-7 bg-[#6366F1] rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md shadow-[#6366F1]/20 group-hover:scale-105 transition-transform">
+              C
             </div>
-            <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                CodeViz AI
-              </h1>
-              <p className="text-xs text-gray-500">Shared Architecture Analysis</p>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-[#E2E8F0] tracking-tight">CodeViz AI</span>
+              <span className="text-[#64748B]">/</span>
+              <span className="text-[#94A3B8]">Shared Analysis</span>
             </div>
           </Link>
+
           <div className="flex items-center space-x-3">
             <button
               onClick={handleCopyLink}
-              className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-300 text-sm font-medium transition-all flex items-center space-x-2"
+              className="px-3 py-1.5 bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold rounded-lg transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
             >
-              <Share2 className="w-4 h-4" />
-              <span>{copied ? 'Link Copied!' : 'Share Analysis'}</span>
+              <Share2 className="w-3.5 h-3.5" />
+              <span>{copied ? 'Copied!' : 'Share Direct Link'}</span>
             </button>
-            <Link href="/" className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-medium transition-all flex items-center space-x-2">
-              <ArrowLeft className="w-4 h-4" />
+            <Link
+              href="/"
+              className="px-3 py-1.5 bg-[#1A2332] hover:bg-[#232D3F] text-[#E2E8F0] border border-[#232D3F] rounded-lg transition-colors flex items-center space-x-1.5 focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
               <span>New Analysis</span>
             </Link>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-6xl space-y-8 relative z-10">
+      {/* Main Workbench Body */}
+      <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
         {loading && (
-          <div className="flex flex-col items-center justify-center py-24 space-y-4">
-            <Loader2 className="w-10 h-10 animate-spin text-emerald-400" />
-            <p className="text-gray-400">Loading analysis result...</p>
+          <div className="flex flex-col items-center justify-center py-24 space-y-3 font-mono text-xs text-[#94A3B8]">
+            <Loader2 className="w-6 h-6 animate-spin text-[#6366F1]" />
+            <span>Fetching stored architecture analysis...</span>
           </div>
         )}
 
         {error && (
-          <div className="max-w-2xl mx-auto p-6 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center space-x-4">
-            <XCircle className="w-8 h-8 text-red-400 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-red-200">Analysis Not Found</h3>
-              <p className="text-sm text-red-300/80 mt-1">{error}</p>
-            </div>
+          <div className="max-w-2xl mx-auto p-4 bg-[#1A1015] border border-[#7F1D1D] rounded-2xl flex items-center space-x-3 font-mono text-xs">
+            <XCircle className="w-5 h-5 text-[#EF4444] flex-shrink-0" />
+            <span className="text-[#F87171]">{error}</span>
           </div>
         )}
 
         {result && (
-          <>
-            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between backdrop-blur-sm">
+          <div className="space-y-6">
+            {/* Results Action & Telemetry Header */}
+            <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4 flex items-center justify-between flex-wrap gap-4 font-mono text-xs">
               <div className="flex items-center space-x-3">
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
-                <span className="text-emerald-200">Persisted Architecture Result</span>
-              </div>
-              <span className="text-xs font-mono text-emerald-400/80">ID: {analysisId}</span>
-            </div>
-
-            <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <h2 className="text-xl font-semibold mb-4 flex items-center space-x-2">
-                <Layers className="w-5 h-5 text-emerald-400" />
-                <span>Architecture Diagram</span>
-              </h2>
-              <MermaidDiagram code={result.mermaid_code} />
-            </div>
-
-            <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <h2 className="text-xl font-semibold mb-4 flex items-center space-x-2">
-                <FileCode className="w-5 h-5 text-teal-400" />
-                <span>Architecture Summary</span>
-              </h2>
-              <p className="text-gray-300 leading-relaxed">{result.summary}</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
-                  <Leaf className="w-5 h-5 text-emerald-400" />
-                  <span>Key Components</span>
-                </h3>
-                <ul className="space-y-3">
-                  {result.key_components.map((c: string, i: number) => (
-                    <li key={i} className="flex items-center space-x-3 text-gray-300">
-                      <div className="w-2 h-2 bg-emerald-400 rounded-full" />
-                      <span>{c}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
-                  <Lightbulb className="w-5 h-5 text-yellow-400" />
-                  <span>Design Patterns</span>
-                </h3>
-                <ul className="space-y-3">
-                  {result.key_patterns.map((p: string, i: number) => (
-                    <li key={i} className="flex items-center space-x-3 text-gray-300">
-                      <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-                      <span>{p}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            {result.repo_stats && !result.repo_stats.error && (
-              <div className="bg-white/3 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-                <h2 className="text-xl font-semibold mb-6">Repository Stats</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[
-                    { icon: Star, color: 'text-yellow-400', val: result.repo_stats.stars, label: 'Stars' },
-                    { icon: GitFork, color: 'text-blue-400', val: result.repo_stats.forks, label: 'Forks' },
-                    { icon: AlertCircle, color: 'text-red-400', val: result.repo_stats.open_issues, label: 'Issues' },
-                    { icon: Eye, color: 'text-emerald-400', val: result.repo_stats.watchers, label: 'Watchers' }
-                  ].map((s, i) => (
-                    <div key={i} className="text-center p-4 bg-black/20 rounded-xl">
-                      <s.icon className={`w-6 h-6 ${s.color} mx-auto mb-2`} />
-                      <div className={`text-2xl font-bold ${s.color}`}>{s.val?.toLocaleString() || 0}</div>
-                      <div className="text-xs text-gray-400">{s.label}</div>
-                    </div>
-                  ))}
+                <div className="p-2 bg-[#10B981]/10 border border-[#10B981]/30 rounded-xl text-[#10B981]">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-white text-sm">Persisted Architecture Snapshot</h2>
+                  <p className="text-[#94A3B8] text-[11px] mt-0.5">
+                    Analysis ID: {analysisId}
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
 
-            {result.file_tree && <FileExplorer fileTree={result.file_tree} analysisId={analysisId} apiUrl={API_URL} />}
-          </>
+            {/* Split View Workbench (65% Left Diagram / 35% Right Inspector) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column (65% Width): Diagram Workbench */}
+              <div className="lg:col-span-8 space-y-4">
+                <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#232D3F] font-mono text-xs">
+                    <div className="flex items-center space-x-2">
+                      <Layers className="w-4 h-4 text-[#6366F1]" />
+                      <span className="font-semibold text-white">System Architecture Canvas</span>
+                    </div>
+                  </div>
+                  <MermaidDiagram code={result.mermaid_code} />
+                </div>
+              </div>
+
+              {/* Right Column (35% Width): Tabbed Inspector Panel */}
+              <div className="lg:col-span-4 space-y-4 font-mono text-xs">
+                <div className="bg-[#121824] border border-[#232D3F] rounded-2xl p-4 space-y-4">
+                  {/* Tab Controls */}
+                  <div className="flex items-center space-x-1 bg-[#0A0E17] p-1 border border-[#232D3F] rounded-xl">
+                    <button
+                      onClick={() => setActiveTab('findings')}
+                      className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
+                        activeTab === 'findings' ? 'bg-[#6366F1] text-white font-semibold' : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
+                      Findings
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('explorer')}
+                      className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
+                        activeTab === 'explorer' ? 'bg-[#6366F1] text-white font-semibold' : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
+                      File Explorer
+                    </button>
+                  </div>
+
+                  {/* Tab 1: Findings */}
+                  {activeTab === 'findings' && (
+                    <div className="space-y-4">
+                      {/* Summary */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8] flex items-center space-x-1.5">
+                          <FileCode2 className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                          <span>Executive Architectural Summary</span>
+                        </div>
+                        <div className="bg-[#0A0E17] border border-[#232D3F] rounded-xl p-3 text-xs leading-relaxed text-[#E2E8F0] font-sans">
+                          {result.summary}
+                        </div>
+                      </div>
+
+                      {/* Key Components */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8]">Key Components</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {result.key_components.map((comp, idx) => (
+                            <span key={idx} className="px-2.5 py-1 bg-[#1A2332] border border-[#232D3F] rounded-lg text-[#6366F1]">
+                              {comp}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Design Patterns */}
+                      <div className="space-y-2">
+                        <div className="text-[#94A3B8]">Architectural Patterns</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {result.key_patterns.map((pat, idx) => (
+                            <span key={idx} className="px-2.5 py-1 bg-[#1A2332] border border-[#232D3F] rounded-lg text-[#8B5CF6]">
+                              {pat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Repo Stats Grid */}
+                      {result.repo_stats && !result.repo_stats.error && (
+                        <div className="pt-2 border-t border-[#232D3F] space-y-2">
+                          <div className="text-[#94A3B8]">Repository Telemetry</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2.5 bg-[#0A0E17] border border-[#232D3F] rounded-xl text-center">
+                              <Star className="w-3.5 h-3.5 text-[#F59E0B] mx-auto mb-1" />
+                              <div className="font-bold text-white">{result.repo_stats.stars?.toLocaleString() || 0}</div>
+                              <div className="text-[10px] text-[#64748B]">Stars</div>
+                            </div>
+                            <div className="p-2.5 bg-[#0A0E17] border border-[#232D3F] rounded-xl text-center">
+                              <GitFork className="w-3.5 h-3.5 text-[#0EA5E9] mx-auto mb-1" />
+                              <div className="font-bold text-white">{result.repo_stats.forks?.toLocaleString() || 0}</div>
+                              <div className="text-[10px] text-[#64748B]">Forks</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 2: Explorer */}
+                  {activeTab === 'explorer' && (
+                    <div>
+                      {result.file_tree ? (
+                        <FileExplorer fileTree={result.file_tree} analysisId={analysisId} apiUrl={API_URL} />
+                      ) : (
+                        <div className="text-center py-6 text-[#64748B]">File tree unavailable</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-[#232D3F] py-4 bg-[#0A0E17]">
+        <div className="container mx-auto px-4 text-center text-xs font-mono text-[#64748B]">
+          CodeViz AI — Precision Codebase Architecture Engine
+        </div>
+      </footer>
     </div>
   );
 }
