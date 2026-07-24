@@ -34,7 +34,7 @@ def set_analyses_ref(ref):
     global analyses_ref
     analyses_ref = ref
 
-def get_code_samples(repo_path, max_files=30, max_size=500):
+def get_code_samples(repo_path, max_files=40, max_size=1200):
     samples = {}
     count = 0
     for root, dirs, files in os.walk(repo_path):
@@ -53,6 +53,25 @@ def get_code_samples(repo_path, max_files=30, max_size=500):
                 except Exception:
                     pass
     return samples
+
+def get_manifest_files(repo_path, max_size=1500):
+    manifest_names = [
+        'requirements.txt', 'package.json', 'pyproject.toml', 'setup.py',
+        'go.mod', 'pom.xml', 'build.gradle', 'Cargo.toml', 'Dockerfile', 'docker-compose.yml'
+    ]
+    manifests = {}
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git']]
+        for file in files:
+            if file.lower() in [m.lower() for m in manifest_names]:
+                filepath = os.path.join(root, file)
+                rel_path = filepath.replace(repo_path, '').lstrip('/\\').replace('\\', '/')
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        manifests[rel_path] = f.read()[:max_size]
+                except Exception:
+                    pass
+    return manifests
 
 def detect_languages(repo_path):
     extensions = {}
@@ -190,11 +209,12 @@ def perform_analysis(analysis_id: str, repo_url: str, branch: str = "main") -> d
             store.update_analysis_status(analysis_id, "analyzing")
             logger.info(f"[{analysis_id}] Extracting code structure and samples...")
 
-            code_samples = get_code_samples(repo_path)
+            code_samples = get_code_samples(repo_path, max_files=40, max_size=1200)
             languages = detect_languages(repo_path)
             frameworks = detect_framework(repo_path)
             file_tree = get_full_file_tree(repo_path)
             file_contents = get_file_contents(repo_path)
+            manifest_files = get_manifest_files(repo_path)
 
             try:
                 file_count = sum(1 for _ in Path(repo_path).rglob('*') if _.is_file() and '.git' not in str(_))
@@ -206,7 +226,7 @@ def perform_analysis(analysis_id: str, repo_url: str, branch: str = "main") -> d
 
             # Step 3: AI Analysis
             logger.info(f"[{analysis_id}] Running AI analysis...")
-            ai_result = analyze_code_with_ai(code_samples, repo_name, languages, frameworks)
+            ai_result = analyze_code_with_ai(code_samples, repo_name, languages, frameworks, file_tree, manifest_files)
             elapsed = round(time.time() - start_time, 2)
 
             if ai_result:
