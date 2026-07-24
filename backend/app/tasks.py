@@ -139,11 +139,11 @@ def get_full_file_tree(repo_path):
         tree[rel_path] = {'dirs': dirs[:], 'files': files[:]}
     return tree
 
-def get_file_contents(repo_path, max_files=50, max_size=10000):
+def get_file_contents(repo_path, max_files=300, max_size=50000):
     contents = {}
     count = 0
     for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git']]
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git', '.next', 'dist', 'build']]
         for file in files:
             if count >= max_files:
                 return contents

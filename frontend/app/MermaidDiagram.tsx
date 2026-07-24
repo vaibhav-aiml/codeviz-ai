@@ -77,7 +77,7 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
             const fallbackCode = cleanedCode
               .split('\n')
               .map(line => {
-                let l = line
+                const l = line
                   .replace(/--\|([^|]+)\|>/g, '-->|$1|')
                   .replace(/--\|([^|]+)\|->/g, '-->|$1|')
                   .replace(/---\|([^|]+)\|>/g, '-->|$1|');
