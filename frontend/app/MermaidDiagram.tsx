@@ -47,26 +47,64 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
         });
         
         let cleanedCode = code
+          .replace(/```mermaid/g, '')
+          .replace(/```/g, '')
           .replace(/→/g, '-->')
           .replace(/⇒/g, '==>')
+          .replace(/--\|([^|]+)\|>/g, '-->|$1|')
+          .replace(/--\|([^|]+)\|->/g, '-->|$1|')
+          .replace(/---\|([^|]+)\|>/g, '-->|$1|')
+          .replace(/-->\|([^|]+)\|>/g, '-->|$1|')
+          .replace(/(?<=\s)->(?=\s)/g, '-->')
           .trim();
         
-        if (!cleanedCode.startsWith('graph') && !cleanedCode.startsWith('flowchart')) {
+        const headerKeywords = ['graph', 'flowchart', 'sequenceDiagram', 'classDiagram', 'stateDiagram', 'erDiagram'];
+        if (!headerKeywords.some(kw => cleanedCode.startsWith(kw))) {
           cleanedCode = 'graph TD\n' + cleanedCode;
         }
         
-        const id = `mermaid-${Date.now()}`;
-        const { svg: renderedSvg } = await mermaid.render(id, cleanedCode);
-        
-        if (!cancelled) {
-          setSvg(renderedSvg);
-          setIsLoading(false);
+        try {
+          const id = `mermaid-${Date.now()}`;
+          const { svg: renderedSvg } = await mermaid.render(id, cleanedCode);
+          if (!cancelled) {
+            setSvg(renderedSvg);
+            setIsLoading(false);
+            return;
+          }
+        } catch (firstErr) {
+          // Fallback pass: sanitize node labels and retry
+          try {
+            const fallbackCode = cleanedCode
+              .split('\n')
+              .map(line => {
+                let l = line
+                  .replace(/--\|([^|]+)\|>/g, '-->|$1|')
+                  .replace(/--\|([^|]+)\|->/g, '-->|$1|')
+                  .replace(/---\|([^|]+)\|>/g, '-->|$1|');
+                return l;
+              })
+              .join('\n');
+            const fallbackId = `mermaid-fb-${Date.now()}`;
+            const { svg: fallbackSvg } = await mermaid.render(fallbackId, fallbackCode);
+            if (!cancelled) {
+              setSvg(fallbackSvg);
+              setIsLoading(false);
+              return;
+            }
+          } catch {
+            // Re-throw first error if fallback fails
+          }
+          if (!cancelled) {
+            console.error('Mermaid rendering error:', firstErr);
+            const errorMsg = firstErr instanceof Error ? firstErr.message : 'Failed to parse & render Mermaid diagram syntax';
+            setError(errorMsg);
+            setIsLoading(false);
+          }
         }
-      } catch (err: unknown) {
+      } catch (outerErr: unknown) {
         if (!cancelled) {
-          console.error('Mermaid rendering error:', err);
-          const errorMsg = err instanceof Error ? err.message : 'Failed to parse & render Mermaid diagram syntax';
-          setError(errorMsg);
+          console.error('Outer rendering error:', outerErr);
+          setError(outerErr instanceof Error ? outerErr.message : 'Diagram rendering error');
           setIsLoading(false);
         }
       }

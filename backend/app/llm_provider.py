@@ -18,6 +18,33 @@ class ArchitectureLLMResponse(BaseModel):
     mermaid_diagram: str
     recommendations: str
 
+def _clean_mermaid_diagram(code: str) -> str:
+    if not code or not isinstance(code, str):
+        return "graph TD\n    A[App] --> B[Core]"
+
+    lines = []
+    for line in code.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith("```"):
+            continue
+        lines.append(line)
+    text = "\n".join(lines).strip()
+
+    text = text.replace("→", "-->").replace("⇒", "==>")
+
+    import re
+    text = re.sub(r'--\|([^|]+)\|>', r'-->|\1|', text)
+    text = re.sub(r'--\|([^|]+)\|->', r'-->|\1|', text)
+    text = re.sub(r'---\|([^|]+)\|>', r'-->|\1|', text)
+    text = re.sub(r'-->\|([^|]+)\|>', r'-->|\1|', text)
+    text = re.sub(r'(?<=\s)->(?=\s)', r'-->', text)
+
+    header_keywords = ["graph", "flowchart", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram"]
+    if not any(text.lstrip().startswith(kw) for kw in header_keywords):
+        text = "graph TD\n" + text
+
+    return text
+
 def _clean_json_text(text: str) -> str:
     text = text.strip()
     if "```" in text:
@@ -110,6 +137,11 @@ Detected framework indicators: {', '.join(frameworks) if frameworks else 'unknow
 5. In "recommendations", give 2-3 SPECIFIC, actionable engineering critiques tied to code you actually 
    saw (e.g. blocking calls in async context, missing input validation, N+1 patterns) — not generic advice
    like "add more tests" or "improve documentation" unless nothing more specific applies.
+6. MERMAID SYNTAX CONSTRAINTS:
+   - Use standard flowchart syntax: "graph TD"
+   - Link syntax with text: A -->|label| B or A -- label --> B (NEVER use invalid arrows like --|label|> or --->|label|>)
+   - Arrow syntax: A --> B (NEVER use single dash A -> B)
+   - Node labels containing special characters (slashes, parentheses, colons) MUST be enclosed in quotes: A["Module (app/main.py)"]
 
 Return ONLY valid JSON matching this exact schema:
 {{
@@ -148,6 +180,8 @@ Return ONLY valid JSON matching this exact schema:
                 raw_text = response.choices[0].message.content or ""
                 cleaned = _clean_json_text(raw_text)
                 parsed = json.loads(cleaned)
+                if "mermaid_diagram" in parsed:
+                    parsed["mermaid_diagram"] = _clean_mermaid_diagram(parsed["mermaid_diagram"])
                 validated = ArchitectureLLMResponse(**parsed)
                 logger.info("[GroqLLMProvider] Successfully parsed and validated LLM response.")
                 return validated.model_dump()
@@ -253,6 +287,8 @@ Return ONLY valid JSON matching this exact schema:
 
             raw_text = response.choices[0].message.content or ""
             parsed = json.loads(raw_text)
+            if "mermaid_diagram" in parsed:
+                parsed["mermaid_diagram"] = _clean_mermaid_diagram(parsed["mermaid_diagram"])
             validated = ArchitectureLLMResponse(**parsed)
             return validated.model_dump()
         except Exception as e:
