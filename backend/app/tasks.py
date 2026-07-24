@@ -146,8 +146,7 @@ def _get_sha_cache_key(repo_url: str, branch: str, sha: str) -> str:
     digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
     return f"sha_cache:{digest}"
 
-@celery_app.task(bind=True, max_retries=1, default_retry_delay=5, soft_time_limit=300, time_limit=360)
-def analyze_repository_task(self, analysis_id: str, repo_url: str, branch: str = "main"):
+def perform_analysis(analysis_id: str, repo_url: str, branch: str = "main") -> dict:
     start_time = time.time()
     logger.info(f"Starting analysis task [id={analysis_id}] for repo={repo_url}, branch={branch}")
 
@@ -168,14 +167,22 @@ def analyze_repository_task(self, analysis_id: str, repo_url: str, branch: str =
 
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_path = os.path.join(tmpdir, "repo")
-            try:
-                Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
-            except Exception as clone_err:
-                logger.warning(f"[{analysis_id}] Branch '{branch}' clone failed ({clone_err}), trying 'master'...")
+            clone_success = False
+            if branch and branch.strip():
                 try:
-                    Repo.clone_from(repo_url, repo_path, branch="master", depth=1)
-                except Exception:
+                    logger.info(f"[{analysis_id}] Cloning branch '{branch}'...")
+                    Repo.clone_from(repo_url, repo_path, branch=branch.strip(), depth=1)
+                    clone_success = True
+                except Exception as clone_err:
+                    logger.warning(f"[{analysis_id}] Branch '{branch}' clone failed ({clone_err}). Attempting default remote branch...")
+
+            if not clone_success:
+                try:
+                    logger.info(f"[{analysis_id}] Cloning default remote branch...")
                     Repo.clone_from(repo_url, repo_path, depth=1)
+                except Exception as clone_err:
+                    logger.error(f"[{analysis_id}] Default branch clone failed: {clone_err}")
+                    raise clone_err
 
             logger.info(f"[{analysis_id}] Repository cloned successfully.")
 
@@ -238,8 +245,17 @@ def analyze_repository_task(self, analysis_id: str, repo_url: str, branch: str =
 
     except Exception as exc:
         logger.error(f"[{analysis_id}] Analysis task failed: {exc}", exc_info=True)
-        if self.request.retries < self.max_retries:
-            logger.info(f"[{analysis_id}] Retrying task...")
-            raise self.retry(exc=exc)
         store.update_analysis_status(analysis_id, "failed")
         raise exc
+
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=5, soft_time_limit=300, time_limit=360)
+def analyze_repository_task(self, analysis_id: str, repo_url: str, branch: str = "main"):
+    try:
+        return perform_analysis(analysis_id, repo_url, branch)
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            logger.info(f"[{analysis_id}] Retrying Celery task...")
+            raise self.retry(exc=exc)
+        raise exc
+

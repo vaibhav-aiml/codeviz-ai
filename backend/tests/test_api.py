@@ -16,3 +16,11 @@ def test_analyze_invalid_host(client):
     response = client.post("/api/analyze", json={"repo_url": "https://gitlab.com/user/repo", "branch": "main"})
     assert response.status_code == 400
     assert "Unsupported git host" in response.json()["detail"]
+
+def test_analyze_url_normalization(client):
+    response = client.post("/api/analyze", json={"repo_url": "github.com/vaibhav-aiml/codeviz-ai/", "branch": "main"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "analysis_id" in data
+    assert data["status"] == "queued"
+

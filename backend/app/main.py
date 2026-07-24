@@ -2,17 +2,18 @@ import hmac
 import hashlib
 import uuid
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, Request, Header
+from fastapi import FastAPI, HTTPException, Query, Request, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from urllib.parse import urlparse
 
 from .config import settings
 from .logger import logger
 from .redis_client import store
-from .tasks import analyze_repository_task, celery_app
+from .tasks import analyze_repository_task, perform_analysis, celery_app
 from .github_stats import get_github_stats
 
 # Optional Sentry initialization
@@ -37,17 +38,20 @@ app = FastAPI(title="CodeViz AI", version="1.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS middleware with explicit allow-list
+cors_origins = settings.cors_origins
+allow_all = "*" in cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=not allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 class AnalysisRequest(BaseModel):
-    repo_url: HttpUrl
+    repo_url: str
     branch: Optional[str] = "main"
 
 @app.get("/")
@@ -69,7 +73,7 @@ async def health_check():
 
     celery_status = "configured"
     try:
-        insp = celery_app.control.inspect(timeout=1.0)
+        insp = celery_app.control.inspect(timeout=0.5)
         workers = insp.ping()
         if not workers:
             celery_status = "no_workers_found"
@@ -87,17 +91,24 @@ async def health_check():
 
 @app.post("/api/analyze")
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
-async def start_analysis(request: Request, body: AnalysisRequest):
+async def start_analysis(request: Request, body: AnalysisRequest, background_tasks: BackgroundTasks):
     """Start a new codebase analysis with validation & rate limiting"""
-    url_str = str(body.repo_url)
-    host = body.repo_url.host.lower() if body.repo_url.host else ""
-    
+    url_str = body.repo_url.strip()
+    if not url_str.startswith(("http://", "https://")):
+        url_str = "https://" + url_str
+    url_str = url_str.rstrip("/")
+
+    parsed = urlparse(url_str)
+    host = parsed.netloc.lower()
+
     # Validation 1: Host verification
-    if not host.endswith("github.com"):
+    if "github.com" not in host:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported git host '{host}'. Only GitHub repositories are supported."
         )
+
+    branch_name = body.branch.strip() if body.branch else "main"
 
     # Validation 2: Pre-flight repository size check
     repo_stats = get_github_stats(url_str)
@@ -117,27 +128,30 @@ async def start_analysis(request: Request, body: AnalysisRequest):
         "analysis_id": analysis_id,
         "status": "queued",
         "repo_url": url_str,
-        "branch": body.branch,
+        "branch": branch_name,
         "result": None
     }
     store.save_analysis(analysis_id, initial_data)
 
-    # Enqueue task to Celery task queue (with fallback if broker unavailable)
+    # Check if Celery worker is active
+    celery_active = False
     try:
-        analyze_repository_task.delay(analysis_id, url_str, body.branch)
-        logger.info(f"Enqueued task {analysis_id} to Celery worker.")
-    except Exception as e:
-        logger.error(f"CRITICAL: Celery task enqueue failed ({e}). Degrading to local synchronous execution.")
-        if settings.SENTRY_DSN:
-            try:
-                import sentry_sdk
-                sentry_sdk.capture_exception(e)
-            except Exception:
-                pass
+        insp = celery_app.control.inspect(timeout=0.5)
+        if insp and insp.ping():
+            celery_active = True
+    except Exception:
+        celery_active = False
+
+    if celery_active:
         try:
-            analyze_repository_task(analysis_id, url_str, body.branch)
-        except Exception as task_err:
-            logger.error(f"Local task execution error: {task_err}")
+            analyze_repository_task.delay(analysis_id, url_str, branch_name)
+            logger.info(f"Enqueued task {analysis_id} to Celery worker.")
+        except Exception as e:
+            logger.error(f"Celery task enqueue failed ({e}). Falling back to BackgroundTasks.")
+            background_tasks.add_task(perform_analysis, analysis_id, url_str, branch_name)
+    else:
+        logger.info(f"Celery worker unavailable. Running task {analysis_id} via FastAPI BackgroundTasks.")
+        background_tasks.add_task(perform_analysis, analysis_id, url_str, branch_name)
 
     return {
         "analysis_id": analysis_id,
@@ -194,6 +208,7 @@ async def get_file_content(analysis_id: str, path: str = Query(..., description=
 @app.post("/api/webhook/github")
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256")
 ):
     """GitHub push webhook endpoint with HMAC signature verification"""
@@ -235,8 +250,8 @@ async def github_webhook(
             try:
                 analyze_repository_task.delay(analysis_id, repo_url, default_branch)
             except Exception as e:
-                logger.error(f"CRITICAL: Celery enqueue failed for webhook ({e}). Executing task locally...")
-                analyze_repository_task(analysis_id, repo_url, default_branch)
+                logger.error(f"CRITICAL: Celery enqueue failed for webhook ({e}). Executing task via BackgroundTasks...")
+                background_tasks.add_task(perform_analysis, analysis_id, repo_url, default_branch)
                 
             return {
                 "message": "Push event received and analysis enqueued",

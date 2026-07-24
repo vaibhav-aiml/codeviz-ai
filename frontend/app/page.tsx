@@ -20,7 +20,7 @@ import {
 import MermaidDiagram from './MermaidDiagram';
 import FileExplorer from './FileExplorer';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001').replace(/\/+$/, '');
 
 interface AnalysisResultData {
   mermaid_code: string;
@@ -133,9 +133,18 @@ export default function Home() {
         }
       }, 2000);
     } catch (err: unknown) {
-      let msg = 'Failed to start analysis. Please verify the URL and try again.';
-      if (axios.isAxiosError(err) && err.response?.data?.detail) {
-        msg = err.response.data.detail;
+      let msg = 'Failed to start analysis. Please check network connection and backend status.';
+      if (axios.isAxiosError(err)) {
+        const detail = err.response?.data?.detail;
+        if (typeof detail === 'string') {
+          msg = detail;
+        } else if (Array.isArray(detail)) {
+          msg = detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(', ');
+        } else if (err.response?.data?.message) {
+          msg = String(err.response.data.message);
+        } else if (err.message) {
+          msg = err.message;
+        }
       }
       setError(msg);
       setLoading(false);
