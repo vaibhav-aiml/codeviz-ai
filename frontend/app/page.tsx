@@ -313,7 +313,7 @@ export default function Home() {
               {analysisId && (
                 <button
                   onClick={() => {
-                    const shareUrl = `${window.location.origin}/?id=${analysisId}`;
+                    const shareUrl = `${window.location.origin}/analysis/${analysisId}`;
                     navigator.clipboard.writeText(shareUrl);
                     alert(`Share link copied to clipboard:\n${shareUrl}`);
                   }}

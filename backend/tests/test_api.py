@@ -1,7 +1,11 @@
 def test_health_check(client):
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "service": "codeviz-api"}
+    data = response.json()
+    assert data["service"] == "codeviz-api"
+    assert "status" in data
+    assert "redis" in data
+    assert "celery" in data
 
 def test_status_404(client):
     response = client.get("/api/status/non-existent-id-12345")
