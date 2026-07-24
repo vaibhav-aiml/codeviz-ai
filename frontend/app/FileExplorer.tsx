@@ -36,17 +36,6 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
     setExpandedFolders(newExpanded);
   };
 
-  const getAllFiles = (tree: FileTree): string[] => {
-    const files: string[] = [];
-    Object.entries(tree).forEach(([folderPath, node]) => {
-      node.files.forEach(file => {
-        const fullPath = folderPath === '/' ? `/${file}` : `${folderPath}/${file}`;
-        files.push(fullPath);
-      });
-    });
-    return files;
-  };
-
   const findFileContent = async (filePath: string) => {
     // Try different path variations
     const variations = [
@@ -66,7 +55,7 @@ export default function FileExplorer({ fileTree, analysisId, apiUrl }: FileExplo
           const data = await response.json();
           return data.content;
         }
-      } catch (e) {
+      } catch {
         continue;
       }
     }

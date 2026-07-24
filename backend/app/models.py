@@ -1,6 +1,7 @@
 from enum import Enum
+
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+
 
 class AnalysisStatus(str, Enum):
     QUEUED = "queued"
@@ -13,8 +14,8 @@ class AnalysisStatus(str, Enum):
 class ArchitectureResult(BaseModel):
     mermaid_code: str
     summary: str
-    key_patterns: List[str]
-    key_components: List[str]
+    key_patterns: list[str]
+    key_components: list[str]
     files_analyzed: int
     processing_time: float
-    repo_stats: Optional[Dict] = None
+    repo_stats: dict | None = None

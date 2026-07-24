@@ -1,11 +1,32 @@
-import asyncio
-import tempfile
+import hashlib
 import os
-from git import Repo
+import tempfile
+import time
 from pathlib import Path
-from .models import ArchitectureResult
+
+from celery import Celery
+from git import Repo
+
 from .ai_analyzer import analyze_code_with_ai
-from .github_stats import get_github_stats
+from .config import settings
+from .github_stats import get_github_stats, get_latest_commit_sha
+from .logger import logger
+from .models import ArchitectureResult
+from .redis_client import store
+
+celery_app = Celery(
+    "codeviz_tasks",
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+)
 
 analyses_ref = None
 
@@ -14,13 +35,10 @@ def set_analyses_ref(ref):
     analyses_ref = ref
 
 def get_code_samples(repo_path, max_files=30, max_size=500):
-    """Get code samples from repository"""
     samples = {}
     count = 0
-    
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git']]
-        
         for file in files:
             if file.endswith(('.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.go', '.rs', '.cpp')):
                 filepath = os.path.join(root, file)
@@ -32,7 +50,7 @@ def get_code_samples(repo_path, max_files=30, max_size=500):
                     count += 1
                     if count >= max_files:
                         return samples
-                except:
+                except Exception:
                     pass
     return samples
 
@@ -44,19 +62,19 @@ def detect_languages(repo_path):
             ext = os.path.splitext(file)[1]
             if ext:
                 extensions[ext] = extensions.get(ext, 0) + 1
-    
+
     lang_map = {
         '.py': 'Python', '.js': 'JavaScript', '.ts': 'TypeScript',
         '.jsx': 'React JSX', '.tsx': 'React TSX', '.java': 'Java',
         '.go': 'Go', '.rs': 'Rust', '.cpp': 'C++', '.c': 'C',
         '.html': 'HTML', '.css': 'CSS', '.json': 'JSON', '.md': 'Markdown'
     }
-    
+
     languages = {}
     for ext, count in sorted(extensions.items(), key=lambda x: x[1], reverse=True):
         lang = lang_map.get(ext, ext)
         languages[lang] = languages.get(lang, 0) + count
-    
+
     return list(languages.keys())[:5]
 
 def detect_framework(repo_path):
@@ -68,7 +86,7 @@ def detect_framework(repo_path):
         'tailwind.config': 'Tailwind CSS', 'tsconfig.json': 'TypeScript',
         'go.mod': 'Go', 'pom.xml': 'Java', 'build.gradle': 'Java'
     }
-    
+
     repo_files = []
     try:
         for item in os.listdir(repo_path):
@@ -77,57 +95,41 @@ def detect_framework(repo_path):
             if os.path.isdir(item_path) and not item.startswith('.'):
                 try:
                     repo_files.extend(os.listdir(item_path)[:10])
-                except:
+                except Exception:
                     pass
-    except:
+    except Exception:
         pass
-    
+
     for indicator, framework in indicators.items():
         for f in repo_files:
-            if indicator in f.lower():
+            if indicator.lower() in f.lower():
                 if framework not in frameworks:
                     frameworks.append(framework)
-    
+
     return frameworks[:5] if frameworks else ['General Application']
 
 def get_full_file_tree(repo_path):
-    """Get complete file tree structure with normalized paths"""
     tree = {}
     exclude_dirs = {'.git', 'node_modules', '__pycache__', 'venv', 'env', '.venv', 'dist', 'build', '.next', 'target'}
-    
+
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
-        
-        rel_path = root.replace(repo_path, '').lstrip('/\\')
-        # Normalize to forward slashes
-        rel_path = rel_path.replace('\\', '/')
+        rel_path = root.replace(repo_path, '').lstrip('/\\').replace('\\', '/')
         if not rel_path:
             rel_path = '/'
-        
-        tree[rel_path] = {
-            'dirs': dirs[:],
-            'files': files[:]
-        }
-    
+        tree[rel_path] = {'dirs': dirs[:], 'files': files[:]}
     return tree
 
 def get_file_contents(repo_path, max_files=50, max_size=10000):
-    """Get contents of important files with normalized paths"""
     contents = {}
     count = 0
-    
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__', '.git']]
-        
         for file in files:
             if count >= max_files:
                 return contents
-            
             filepath = os.path.join(root, file)
-            rel_path = filepath.replace(repo_path, '').lstrip('/\\')
-            # Normalize to forward slashes
-            rel_path = rel_path.replace('\\', '/')
-            
+            rel_path = filepath.replace(repo_path, '').lstrip('/\\').replace('\\', '/')
             try:
                 size = os.path.getsize(filepath)
                 if size < max_size:
@@ -135,105 +137,109 @@ def get_file_contents(repo_path, max_files=50, max_size=10000):
                         content = f.read()
                     contents[rel_path] = content
                     count += 1
-            except:
+            except Exception:
                 pass
-    
     return contents
 
-async def analyze_repository_task(analysis_id: str, repo_url: str, branch: str):
-    """AI-powered analysis pipeline"""
+def _get_sha_cache_key(repo_url: str, branch: str, sha: str) -> str:
+    raw = f"{repo_url.lower()}:{branch}:{sha}"
+    digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    return f"sha_cache:{digest}"
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=5, soft_time_limit=300, time_limit=360)
+def analyze_repository_task(self, analysis_id: str, repo_url: str, branch: str = "main"):
+    start_time = time.time()
+    logger.info(f"Starting analysis task [id={analysis_id}] for repo={repo_url}, branch={branch}")
+
     try:
-        if analyses_ref is None:
-            print("ERROR: analyses_ref not set!")
-            return
-            
-        print(f"\n🚀 Analyzing: {repo_url}")
-        
+        # Check commit SHA cache
+        sha = get_latest_commit_sha(repo_url, branch)
+        if sha:
+            cache_key = _get_sha_cache_key(repo_url, branch, sha)
+            cached_result = store.get_cache(cache_key)
+            if cached_result:
+                logger.info(f"[{analysis_id}] Serving cached result for SHA {sha[:8]}.")
+                store.update_analysis_status(analysis_id, "completed", result=cached_result)
+                return cached_result
+
         # Step 1: Clone
-        analyses_ref[analysis_id]["status"] = "cloning"
-        print("📦 Cloning repository...")
-        
+        store.update_analysis_status(analysis_id, "cloning")
+        logger.info(f"[{analysis_id}] Cloning repository...")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_path = os.path.join(tmpdir, "repo")
             try:
                 Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
-            except:
-                print(f"   Branch '{branch}' not found, trying 'master'...")
-                Repo.clone_from(repo_url, repo_path, branch='master', depth=1)
-            print("✅ Cloned!")
-            
-            # Step 2: Analyze code
-            analyses_ref[analysis_id]["status"] = "analyzing"
-            print("🔍 Extracting code samples...")
-            
+            except Exception as clone_err:
+                logger.warning(f"[{analysis_id}] Branch '{branch}' clone failed ({clone_err}), trying 'master'...")
+                try:
+                    Repo.clone_from(repo_url, repo_path, branch="master", depth=1)
+                except Exception:
+                    Repo.clone_from(repo_url, repo_path, depth=1)
+
+            logger.info(f"[{analysis_id}] Repository cloned successfully.")
+
+            # Step 2: Analyze code structure
+            store.update_analysis_status(analysis_id, "analyzing")
+            logger.info(f"[{analysis_id}] Extracting code structure and samples...")
+
             code_samples = get_code_samples(repo_path)
             languages = detect_languages(repo_path)
             frameworks = detect_framework(repo_path)
-            
-            # Get file tree and contents
-            print("📂 Building file tree...")
             file_tree = get_full_file_tree(repo_path)
             file_contents = get_file_contents(repo_path)
-            
+
             try:
                 file_count = sum(1 for _ in Path(repo_path).rglob('*') if _.is_file() and '.git' not in str(_))
-            except:
+            except Exception:
                 file_count = len(code_samples)
-            
-            repo_name = repo_url.split('/')[-1].replace('.git', '')
-            
-            print(f"   Languages: {languages}")
-            print(f"   Frameworks: {frameworks}")
-            print(f"   Files: {file_count}")
-            
-            # Fetch GitHub stats
-            print("📊 Fetching GitHub stats...")
+
+            repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
             repo_stats = get_github_stats(repo_url)
-            if repo_stats and "error" not in repo_stats:
-                print(f"   ⭐ Stars: {repo_stats.get('stars')}, Forks: {repo_stats.get('forks')}")
-            else:
-                print(f"   Stats unavailable: {repo_stats.get('error', 'unknown') if repo_stats else 'no response'}")
-            
+
             # Step 3: AI Analysis
-            analyses_ref[analysis_id]["status"] = "analyzing"
-            print("🤖 Running AI analysis...")
-            
+            logger.info(f"[{analysis_id}] Running AI analysis...")
             ai_result = analyze_code_with_ai(code_samples, repo_name, languages, frameworks)
-            
+            elapsed = round(time.time() - start_time, 2)
+
             if ai_result:
-                print("✅ AI analysis complete!")
-                
                 result = ArchitectureResult(
                     mermaid_code=ai_result.get("mermaid_diagram", "graph TD\n    A[App] --> B[Core]"),
                     summary=ai_result.get("summary", f"Analysis of {repo_name}"),
                     key_components=ai_result.get("key_components", frameworks),
                     key_patterns=ai_result.get("design_patterns", ["Modular Architecture"]),
                     files_analyzed=file_count,
-                    processing_time=0.0,
+                    processing_time=elapsed,
                     repo_stats=repo_stats
                 )
             else:
-                print("⚠️ AI failed, using fallback")
                 result = ArchitectureResult(
                     mermaid_code=f"graph TD\n    A[{repo_name}] --> B[Core]\n    B --> C[Services]",
                     summary=f"This is a {', '.join(languages[:3])} project using {', '.join(frameworks[:3])}.",
                     key_components=frameworks,
                     key_patterns=["Modular Architecture"],
                     files_analyzed=file_count,
-                    processing_time=0.0,
+                    processing_time=elapsed,
                     repo_stats=repo_stats
                 )
-            
-            # Add file tree and contents to result
+
             result_dict = result.model_dump()
             result_dict["file_tree"] = file_tree
             result_dict["file_contents"] = file_contents
-            
-            analyses_ref[analysis_id]["status"] = "completed"
-            analyses_ref[analysis_id]["result"] = result_dict
-            print("✅ DONE!")
-            
-    except Exception as e:
-        print(f"❌ FAILED: {type(e).__name__}: {e}")
-        if analyses_ref and analysis_id in analyses_ref:
-            analyses_ref[analysis_id]["status"] = "failed"
+
+            store.update_analysis_status(analysis_id, "completed", result=result_dict)
+
+            if sha:
+                cache_key = _get_sha_cache_key(repo_url, branch, sha)
+                store.set_cache(cache_key, result_dict, ttl=604800)
+
+            logger.info(f"[{analysis_id}] Task completed in {elapsed}s.")
+            return result_dict
+
+    except Exception as exc:
+        logger.error(f"[{analysis_id}] Analysis task failed: {exc}", exc_info=True)
+        if self.request.retries < self.max_retries:
+            logger.info(f"[{analysis_id}] Retrying task...")
+            raise self.retry(exc=exc)
+        store.update_analysis_status(analysis_id, "failed")
+        raise exc

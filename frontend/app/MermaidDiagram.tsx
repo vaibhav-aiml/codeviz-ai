@@ -8,7 +8,6 @@ interface MermaidDiagramProps {
 }
 
 export default function MermaidDiagram({ code }: MermaidDiagramProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const diagramRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -46,10 +45,11 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
           setSvg(renderedSvg);
           setIsLoading(false);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
           console.error('Mermaid error:', err);
-          setError(err.message || 'Failed to render diagram');
+          const errorMsg = err instanceof Error ? err.message : 'Failed to render diagram';
+          setError(errorMsg);
           setIsLoading(false);
         }
       }
