@@ -77,7 +77,7 @@ The easiest way to run CodeViz AI with Redis, Celery, Backend, and Frontend is u
 
 4. **Access Applications:**
    - **Frontend UI**: [http://localhost:3000](http://localhost:3000)
-   - **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+   - **Backend API Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
 
 ---
 
