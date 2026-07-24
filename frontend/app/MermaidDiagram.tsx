@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { downloadPNG, downloadPDF } from './exportUtils';
-import { Maximize2, Minimize2, Download, FileText, Code2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Maximize2, Minimize2, Download, FileText, Code2, AlertTriangle, Loader2, X } from 'lucide-react';
 
 interface MermaidDiagramProps {
   code: string;
@@ -124,6 +124,16 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
     };
   }, [code]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && zoomed) {
+        setZoomed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoomed]);
+
   const handleDownloadSVG = () => {
     if (!svg) return;
     const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -236,11 +246,21 @@ export default function MermaidDiagram({ code }: MermaidDiagramProps) {
       {/* Diagram Canvas Container */}
       {!error && (
         <div
-          className={`bg-[#0A0E17] rounded-xl border border-[#232D3F] overflow-auto transition-all duration-200 ${
+          className={`bg-[#0A0E17] rounded-xl border border-[#232D3F] overflow-auto transition-all duration-200 relative ${
             zoomed ? 'fixed inset-6 z-50 p-8 shadow-2xl bg-[#0A0E17]/95 backdrop-blur-xl border-[#6366F1]/50' : 'p-6 min-h-[320px]'
           }`}
           style={{ maxHeight: zoomed ? 'calc(100vh - 48px)' : '520px' }}
         >
+          {zoomed && (
+            <button
+              onClick={() => setZoomed(false)}
+              className="sticky top-0 float-right z-50 px-3 py-1.5 bg-[#1A2332] hover:bg-[#EF4444] text-[#E2E8F0] hover:text-white rounded-lg border border-[#232D3F] transition-all flex items-center space-x-1.5 font-mono text-xs shadow-lg focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+              title="Close Fullscreen View (Esc)"
+            >
+              <X className="w-4 h-4" />
+              <span>Close</span>
+            </button>
+          )}
           {isLoading && (
             <div className="flex items-center justify-center h-48 text-[#94A3B8] text-xs font-mono space-x-2">
               <Loader2 className="w-5 h-5 animate-spin text-[#6366F1]" />
